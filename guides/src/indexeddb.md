@@ -58,6 +58,7 @@ await users.index('byAge').records(range.from(18)) // adults, index-backed (O(lo
 | `range`                | const    | Key-range builders (`only` / `above` / `from` / `below` / `to` / `between` / `prefix`).   |
 | `wrapError`            | function | Map a native IndexedDB `DOMException` to a typed `IndexedDBError` (the request boundary). |
 | `IndexedDBError`       | class    | A wrapper error carrying a machine-readable `code` mapped from the native fault.          |
+| `isIndexedDBError`     | function | Whether a value is an `IndexedDBError`.                                                   |
 
 ### Constants
 
@@ -67,22 +68,23 @@ await users.index('byAge').records(range.from(18)) // adults, index-backed (O(lo
 
 ### Types
 
-| API                                  | Kind      | Summary                                                                         |
-| ------------------------------------ | --------- | ------------------------------------------------------------------------------- |
-| `Row`                                | type      | A record stored in, and read from, an object store.                             |
-| `KeyPath`                            | type      | A key path — one field, or several for a compound key.                          |
-| `IndexDefinition`                    | interface | A secondary index's definition (`name` / `path` / `unique` / `multiple`).       |
-| `StoreDefinition`                    | interface | A store's schema (`path` / `increment` / `indexes`).                            |
-| `StoresShape`                        | type      | A database's stores — a map of store name to its `StoreDefinition`.             |
-| `IndexedDBDatabaseOptions`           | interface | Options for `createIndexedDBDatabase` (`name` / optional `version` / `stores`). |
-| `CursorOptions`                      | interface | Options for opening a cursor (`query` key range, `direction`).                  |
-| `IndexedDBErrorCode`                 | type      | The machine-readable `IndexedDBError` code union.                               |
-| `IndexedDBDatabaseInterface`         | interface | The database contract.                                                          |
-| `IndexedDBStoreInterface`            | interface | The object-store contract.                                                      |
-| `IndexedDBIndexInterface`            | interface | The secondary-index contract.                                                   |
-| `IndexedDBCursorInterface`           | interface | The cursor contract.                                                            |
-| `IndexedDBTransactionInterface`      | interface | The explicit-transaction contract.                                              |
-| `IndexedDBTransactionStoreInterface` | interface | The transaction-bound store contract.                                           |
+| API                                  | Kind      | Summary                                                                               |
+| ------------------------------------ | --------- | ------------------------------------------------------------------------------------- |
+| `Row`                                | type      | A record stored in, and read from, an object store.                                   |
+| `KeyPath`                            | type      | A key path — one field, or several for a compound key.                                |
+| `IndexDefinition`                    | interface | A secondary index's definition (`name` / `path` / `unique` / `multiple`).             |
+| `StoreDefinition`                    | interface | A store's schema (`path` / `increment` / `indexes`).                                  |
+| `StoresShape`                        | type      | A database's stores — a map of store name to its `StoreDefinition`.                   |
+| `IndexedDBUpgradeContext`            | interface | The versionchange upgrade escape hatch (`transaction` / `create` / `drop` / `store`). |
+| `IndexedDBDatabaseOptions`           | interface | Options for `createIndexedDBDatabase` (`name` / `version?` / `stores` / `upgrade?`).  |
+| `CursorOptions`                      | interface | Options for opening a cursor (`query` key range, `direction`).                        |
+| `IndexedDBErrorCode`                 | type      | The machine-readable `IndexedDBError` code union.                                     |
+| `IndexedDBDatabaseInterface`         | interface | The database contract.                                                                |
+| `IndexedDBStoreInterface`            | interface | The object-store contract.                                                            |
+| `IndexedDBIndexInterface`            | interface | The secondary-index contract.                                                         |
+| `IndexedDBCursorInterface`           | interface | The cursor contract.                                                                  |
+| `IndexedDBTransactionInterface`      | interface | The explicit-transaction contract.                                                    |
+| `IndexedDBTransactionStoreInterface` | interface | The transaction-bound store contract.                                                 |
 
 Values are this package's own `Row` (a record), narrowed from IndexedDB's structured clone with `isRecord` (from `@orkestrel/contract`) at the read boundary — an `as`-free bridge. Keys are the full native `IDBValidKey`, so the wrapper speaks IndexedDB's whole key space.
 
@@ -170,6 +172,14 @@ The transaction-bound CRUD surface — the same verbs as a store, without `index
 | `remove`  | `Promise<void>`                             | Delete by key (array → batch).                      |
 | `clear`   | `Promise<void>`                             | Empty the store.                                    |
 | `cursor`  | `Promise<IndexedDBCursorInterface \| null>` | Open a cursor within the transaction.               |
+
+#### `IndexedDBUpgradeContext`
+
+| Method   | Returns                              | Behavior                                                 |
+| -------- | ------------------------------------ | -------------------------------------------------------- |
+| `create` | `void`                               | Create a store from its definition (within the upgrade). |
+| `drop`   | `void`                               | Delete a store (within the upgrade).                     |
+| `store`  | `IndexedDBTransactionStoreInterface` | A transaction-bound store for data migration.            |
 
 ## Contract
 
@@ -292,18 +302,65 @@ try {
 
 Every native `DOMException` crosses the request boundary as an `IndexedDBError` carrying a machine-readable `code` (`CONSTRAINT`, `NOT_FOUND`, `QUOTA`, `ABORTED`, …), so a `catch` branches on `error.code` rather than parsing a message string.
 
+### Narrowing a caught value with `isIndexedDBError`
+
+```ts
+import { isIndexedDBError } from '@src/browser'
+
+try {
+	await db.store('users').resolve('ghost')
+} catch (error) {
+	if (isIndexedDBError(error) && error.code === 'NOT_FOUND') {
+		// handle the miss
+	} else throw error
+}
+```
+
+### Versioned upgrades: dropping a store, indexing an existing store, migrating data
+
+> **The auto-commit rule.** A transaction — including the versionchange transaction `upgrade` runs in — commits the moment control returns to the event loop with no pending IndexedDB request. Every step inside `upgrade` (and inside any `read` / `write` scope) must be an awaited IndexedDB request; a non-IDB `await` (a `fetch`, a `setTimeout`, an unrelated Promise) lets the transaction auto-commit out from under you, so any later `IndexedDBTransactionStoreInterface` call on it fails `INACTIVE`. This is also why there is no returnable, held-open transaction handle on this wrapper — IndexedDB itself auto-commits any transaction that isn't driven promptly, so a handle you could stash and use later would be broken by design; `read` / `write` and `upgrade` exist specifically to keep the whole scope on the stack instead.
+
+```ts
+import { createIndexedDBDatabase } from '@src/browser'
+
+const db = createIndexedDBDatabase({
+	name: 'app',
+	version: 2,
+	stores: { users: { path: 'id', indexes: [{ name: 'byName', path: 'name' }] } },
+	upgrade: async (context) => {
+		// Drop a retired store.
+		context.drop('legacy')
+		// Create a brand-new store the built-in create-missing pass doesn't cover
+		// because it isn't declared in `stores` (e.g. app-internal bookkeeping).
+		context.create('meta', { path: 'key' })
+		// Add an index to an EXISTING store — the raw versionchange transaction is
+		// the only way to do this; the built-in pass only creates missing stores.
+		context.transaction.objectStore('users').createIndex('byName', 'name')
+		// Migrate data in place, awaiting only the IDB requests `store()` issues.
+		const store = context.store('users')
+		for (const row of await store.records()) {
+			await store.set({ ...row, migrated: true })
+		}
+	},
+})
+await db.connect()
+```
+
 ### Practices
 
 - **Feature-detect with `isIndexedDBSupported`** before opening a database in an environment that may lack storage (a non-browser runtime, a privacy mode).
 - **Declare a `path`** for ordinary stores (in-line keys); omit it only when you mean to pass keys explicitly (out-of-line).
-- **Keep transaction scopes to awaited IndexedDB operations** — an unrelated `await` between steps lets the transaction auto-commit.
+- **Keep transaction scopes to awaited IndexedDB operations** — an unrelated `await` between steps lets the transaction auto-commit (see the auto-commit rule above).
 - **Reach for `range`** instead of reading everything and filtering in JS; an index plus a key range is the wrapper's whole point.
+- **A live connection yields to another tab's upgrade.** The database wires the native `onversionchange` event to close itself, so a second tab (or a second `IndexedDBDatabaseInterface` in the same page) opening at a higher version is never blocked indefinitely; a later call on the yielded handle lazily reconnects. Without this, two open tabs over the same database can hang forever.
+- **Storage persistence is app policy, not this wrapper's job.** Whether the browser is allowed to evict a database under storage pressure (`navigator.storage.persist()`) is a call the consuming application makes — this wrapper does not surface a `durability` option or any persistence API; it stays strictly on the raw IndexedDB CRUD/schema surface.
+- **Safari quirks — untested here, Chromium-only CI.** This package's test suite runs against real Chromium only. Safari has historically shipped `getAll` bugs and first-transaction-after-upgrade quirks on some versions; if you must support Safari, verify your exact schema and upgrade path there directly rather than assuming Chromium parity.
 
 ## Tests
 
 - [`tests/guides/src/parity.test.ts`](../../tests/guides/src/parity.test.ts) — the `## Surface` ↔ `src/browser` bijection.
-- [`tests/src/browser/helpers.test.ts`](../../tests/src/browser/helpers.test.ts) — the `isIndexedDBSupported` probe, the `range` key-range builders, the shared read primitives (`readRecord` / `readRecords` / `hasKey`) over a real store / index (including the non-record `isRecord` boundary), and the `promisifyRequest` / `promisifyTransaction` bridges (success + `IndexedDBError` rejection) and `wrapError`.
-- [`tests/src/browser/IndexedDBDatabase.test.ts`](../../tests/src/browser/IndexedDBDatabase.test.ts) — the database handle in real Chromium: lazy connect and state, the `store` accessor, atomic `read` / `write` scopes, `close` / `drop`, the auto-managed schema path, and persistence across reopen.
+- [`tests/src/browser/helpers.test.ts`](../../tests/src/browser/helpers.test.ts) — the `isIndexedDBSupported` probe, the `range` key-range builders, the shared read primitives (`readRecord` / `readRecords` / `hasKey`) over a real store / index (including the non-record `isRecord` boundary), the `promisifyRequest` / `promisifyTransaction` bridges (success + `IndexedDBError` rejection), `wrapError` (including `INACTIVE` / `INVALID`), and `isIndexedDBError`.
+- [`tests/src/browser/IndexedDBDatabase.test.ts`](../../tests/src/browser/IndexedDBDatabase.test.ts) — the database handle in real Chromium: lazy connect and state, the `store` accessor, atomic `read` / `write` scopes, `close` / `drop`, the auto-managed schema path, persistence across reopen, the `upgrade` hook (dropping a store, indexing an existing store, data migration, `context.create`, and `old` / `version` / `stores`), and a live connection yielding to a second connection's `versionchange`.
 - [`tests/src/browser/IndexedDBStore.test.ts`](../../tests/src/browser/IndexedDBStore.test.ts) — the store reached through `db.store(name)`: metadata getters, the keyed CRUD surface with array-first batch overloads, key-range reads, `index` / `cursor` access, and the `NOT_FOUND` / `CONSTRAINT` faults.
 - [`tests/src/browser/IndexedDBIndex.test.ts`](../../tests/src/browser/IndexedDBIndex.test.ts) — the index reached through `store.index(name)`: metadata getters, the read surface (`get` / `resolve` / `records` / `keys` / `primary` / `has` / `count` / `cursor`), the unique-index lookup + constraint, and the `multiple` (multiEntry) array index.
 - [`tests/src/browser/IndexedDBCursor.test.ts`](../../tests/src/browser/IndexedDBCursor.test.ts) — the store/index cursor: the position snapshot (`key` / `primary` / `value` / `direction`), the moves (`continue` / `seek` / `advance`), and in-place `update` / `delete`.

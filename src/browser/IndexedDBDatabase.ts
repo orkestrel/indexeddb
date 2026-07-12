@@ -4,6 +4,7 @@ import type {
 	IndexedDBDatabaseOptions,
 	IndexedDBStoreInterface,
 	IndexedDBTransactionInterface,
+	IndexedDBUpgradeContext,
 	StoreDefinition,
 	StoresShape,
 } from './types.js'
@@ -11,6 +12,7 @@ import { IndexedDBError } from './errors.js'
 import { promisifyTransaction } from './helpers.js'
 import { IndexedDBStore } from './IndexedDBStore.js'
 import { IndexedDBTransaction } from './IndexedDBTransaction.js'
+import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
 
 /**
  * A browser-native IndexedDB database — a typed, Promise-based handle.
@@ -29,6 +31,7 @@ export class IndexedDBDatabase<
 	readonly #name: string
 	readonly #version: number | undefined
 	readonly #stores: Stores
+	readonly #upgrade: ((context: IndexedDBUpgradeContext) => void) | undefined
 	#database: IDBDatabase | undefined
 	#opening: Promise<IDBDatabase> | undefined
 	#closed = false
@@ -49,6 +52,7 @@ export class IndexedDBDatabase<
 		this.#name = options.name
 		this.#version = options.version
 		this.#stores = options.stores
+		this.#upgrade = options.upgrade
 	}
 
 	get database(): IDBDatabase {
@@ -184,6 +188,14 @@ export class IndexedDBDatabase<
 		database.onclose = () => {
 			this.#database = undefined
 		}
+		// Yield to another context's version-change upgrade instead of blocking it
+		// indefinitely — without this, two tabs over the same database hang: the
+		// second tab's `open` sits in `onblocked` forever because this connection
+		// never closes on its own. Closing here lets that upgrade proceed; a later
+		// operation on this handle lazily reconnects.
+		database.onversionchange = () => {
+			database.close()
+		}
 		this.#database = database
 		return database
 	}
@@ -195,11 +207,17 @@ export class IndexedDBDatabase<
 				version === undefined
 					? globalThis.indexedDB.open(this.#name)
 					: globalThis.indexedDB.open(this.#name, version)
-			request.onupgradeneeded = () => {
+			request.onupgradeneeded = (event) => {
 				const database = request.result
 				for (const [name, definition] of Object.entries(this.#stores)) {
 					if (!database.objectStoreNames.contains(name)) {
 						this.#createStore(database, name, definition)
+					}
+				}
+				if (this.#upgrade !== undefined) {
+					const transaction = request.transaction
+					if (transaction !== null) {
+						this.#upgrade(this.#context(database, transaction, event))
 					}
 				}
 			}
@@ -216,6 +234,28 @@ export class IndexedDBDatabase<
 	// Declared stores the open database does not yet contain.
 	#missing(database: IDBDatabase): readonly string[] {
 		return Object.keys(this.#stores).filter((name) => !database.objectStoreNames.contains(name))
+	}
+
+	// Build the upgrade context passed to `options.upgrade`, after the built-in
+	// create-missing-stores pass so `stores` reflects any store just created.
+	#context(
+		database: IDBDatabase,
+		transaction: IDBTransaction,
+		event: IDBVersionChangeEvent,
+	): IndexedDBUpgradeContext {
+		return {
+			transaction,
+			old: event.oldVersion,
+			version: event.newVersion ?? database.version,
+			stores: Array.from(database.objectStoreNames),
+			create: (name, definition) => {
+				this.#createStore(database, name, definition)
+			},
+			drop: (name) => {
+				database.deleteObjectStore(name)
+			},
+			store: (name) => new IndexedDBTransactionStore(transaction.objectStore(name)),
+		}
 	}
 
 	#createStore(database: IDBDatabase, name: string, definition: StoreDefinition): void {

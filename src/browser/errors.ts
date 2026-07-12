@@ -35,3 +35,13 @@ export class IndexedDBError extends Error {
 		this.code = code
 	}
 }
+
+/**
+ * Whether a value is an {@link IndexedDBError}.
+ *
+ * @param value - The value to test
+ * @returns `true` when `value` is an `IndexedDBError`
+ */
+export function isIndexedDBError(value: unknown): value is IndexedDBError {
+	return value instanceof IndexedDBError
+}

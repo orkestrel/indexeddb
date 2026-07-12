@@ -1,6 +1,7 @@
 import {
 	hasKey,
 	IndexedDBError,
+	isIndexedDBError,
 	isIndexedDBSupported,
 	promisifyRequest,
 	promisifyTransaction,
@@ -248,6 +249,8 @@ describe('wrapError — DOMException → IndexedDBError', () => {
 		expect(wrapError(new DOMException('', 'NotFoundError')).code).toBe('NOT_FOUND')
 		expect(wrapError(new DOMException('', 'DataError')).code).toBe('DATA')
 		expect(wrapError(new DOMException('', 'VersionError')).code).toBe('UPGRADE')
+		expect(wrapError(new DOMException('', 'TransactionInactiveError')).code).toBe('INACTIVE')
+		expect(wrapError(new DOMException('', 'InvalidStateError')).code).toBe('INVALID')
 	})
 
 	it('falls back to UNKNOWN for an unmapped name, synthesizing a message', () => {
@@ -262,5 +265,18 @@ describe('wrapError — DOMException → IndexedDBError', () => {
 		expect(wrapped.code).toBe('UNKNOWN')
 		expect(wrapped.message).toBe('Unknown IndexedDB error')
 		expect(wrapped.cause).toBeUndefined()
+	})
+})
+
+describe('isIndexedDBError — type guard', () => {
+	it('narrows a thrown IndexedDBError', () => {
+		const error = new IndexedDBError('NOT_FOUND', 'missing')
+		expect(isIndexedDBError(error)).toBe(true)
+	})
+
+	it('returns false for a plain Error and other values', () => {
+		expect(isIndexedDBError(new Error('plain'))).toBe(false)
+		expect(isIndexedDBError('IndexedDBError')).toBe(false)
+		expect(isIndexedDBError(undefined)).toBe(false)
 	})
 })

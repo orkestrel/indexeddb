@@ -1,5 +1,10 @@
 import type { IndexedDBDatabaseInterface } from '@src/browser'
-import { createIndexedDBDatabase, IndexedDBError } from '@src/browser'
+import {
+	createIndexedDBDatabase,
+	IndexedDBError,
+	promisifyRequest,
+	promisifyTransaction,
+} from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import { captureError } from '../../setup.js'
 import {
@@ -192,6 +197,183 @@ describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 		expect(v2.stores).toContain('posts')
 		await v2.store('posts').set({ id: 'p1' })
 		expect(await v2.store('posts').get('p1')).toEqual({ id: 'p1' })
+	})
+})
+
+describe('IndexedDBDatabase — upgrade hook', () => {
+	it('drops a store while leaving others intact', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const v1 = createIndexedDBDatabase({
+			name,
+			version: 1,
+			stores: { users: { path: 'id' }, posts: { path: 'id' } },
+		})
+		await v1.connect()
+		await v1.store('users').set({ id: 'u1', name: 'Ada' })
+		await v1.store('posts').set({ id: 'p1' })
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' }, posts: { path: 'id' } },
+			upgrade: (context) => {
+				context.drop('posts')
+			},
+		})
+		cleanups.push(async () => {
+			v2.close()
+			await deleteDatabase(name)
+		})
+		await v2.connect()
+		expect([...v2.database.objectStoreNames]).toEqual(['users'])
+		expect(await v2.store('users').get('u1')).toEqual({ id: 'u1', name: 'Ada' })
+	})
+
+	it('adds an index to an existing store via the raw versionchange transaction', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		await v1.store('users').set([
+			{ id: 'u1', name: 'Ada' },
+			{ id: 'u2', name: 'Bea' },
+		])
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id', indexes: [{ name: 'byName', path: 'name' }] } },
+			upgrade: (context) => {
+				context.transaction.objectStore('users').createIndex('byName', 'name')
+			},
+		})
+		cleanups.push(async () => {
+			v2.close()
+			await deleteDatabase(name)
+		})
+		await v2.connect()
+		expect(await v2.store('users').index('byName').get('Bea')).toEqual({ id: 'u2', name: 'Bea' })
+	})
+
+	it('migrates data within the upgrade transaction via context.store', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		await v1.store('users').set([
+			{ id: 'u1', name: 'ada' },
+			{ id: 'u2', name: 'bea' },
+		])
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' } },
+			upgrade: async (context) => {
+				const store = context.store('users')
+				const rows = await store.records()
+				for (const row of rows) {
+					const nameValue = typeof row.name === 'string' ? row.name.toUpperCase() : row.name
+					await store.set({ ...row, name: nameValue })
+				}
+			},
+		})
+		cleanups.push(async () => {
+			v2.close()
+			await deleteDatabase(name)
+		})
+		await v2.connect()
+		expect(await v2.store('users').get('u1')).toEqual({ id: 'u1', name: 'ADA' })
+		expect(await v2.store('users').get('u2')).toEqual({ id: 'u2', name: 'BEA' })
+	})
+
+	it('creates a store via context.create, honouring its definition', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' } },
+			upgrade: (context) => {
+				context.create('logs', { path: 'id', increment: false })
+			},
+		})
+		cleanups.push(async () => {
+			v2.close()
+			await deleteDatabase(name)
+		})
+		await v2.connect()
+		expect(v2.database.objectStoreNames.contains('logs')).toBe(true)
+		const raw = v2.database.transaction(['logs'], 'readwrite')
+		raw.objectStore('logs').put({ id: 'l1', message: 'hi' })
+		await promisifyTransaction(raw)
+		const read = v2.database.transaction(['logs'], 'readonly')
+		const record = await promisifyRequest(read.objectStore('logs').get('l1'))
+		expect(record).toEqual({ id: 'l1', message: 'hi' })
+	})
+
+	it('exposes old / version / stores correctly on the context', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		v1.close()
+
+		let seenOld: number | undefined
+		let seenVersion: number | undefined
+		let seenStores: readonly string[] | undefined
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 3,
+			stores: { users: { path: 'id' }, posts: { path: 'id' } },
+			upgrade: (context) => {
+				seenOld = context.old
+				seenVersion = context.version
+				seenStores = context.stores
+			},
+		})
+		cleanups.push(async () => {
+			v2.close()
+			await deleteDatabase(name)
+		})
+		await v2.connect()
+		expect(seenOld).toBe(1)
+		expect(seenVersion).toBe(3)
+		expect([...(seenStores ?? [])].sort()).toEqual(['posts', 'users'])
+	})
+})
+
+describe('IndexedDBDatabase — versionchange yields a live connection', () => {
+	it('closes the first connection so a second connection at a higher version can open', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const first = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await first.connect()
+		expect(first.open).toBe(true)
+
+		const second = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' }, posts: { path: 'id' } },
+		})
+		cleanups.push(async () => {
+			second.close()
+			await deleteDatabase(name)
+		})
+		// Without the onversionchange yield, this would hang indefinitely on
+		// `onblocked` since `first` never releases its connection on its own — the
+		// second `connect` completing at all (rather than timing out) is the proof.
+		await second.connect()
+		expect(second.open).toBe(true)
+		expect(second.version).toBe(2)
 	})
 })
 

@@ -33,7 +33,10 @@ export type Row = Record<string, unknown>
  * (a `resolve` miss), `CONSTRAINT` (a unique-key violation), `QUOTA` (storage
  * full), `ABORTED` (a transaction rolled back), `BLOCKED` (an open held up by
  * another live connection), `DATA` (an invalid key or value), `OPEN` /
- * `UPGRADE` (a failed open or schema upgrade), and `UNKNOWN` (any unmapped fault).
+ * `UPGRADE` (a failed open or schema upgrade), `INACTIVE` (the transaction went
+ * inactive — IndexedDB's auto-commit fault, raised when an operation runs after
+ * a non-IDB `await` deactivated its transaction), `INVALID` (an operation on a
+ * closed or otherwise invalid connection), and `UNKNOWN` (any unmapped fault).
  */
 export type IndexedDBErrorCode =
 	| 'NOT_OPEN'
@@ -46,6 +49,8 @@ export type IndexedDBErrorCode =
 	| 'DATA'
 	| 'OPEN'
 	| 'UPGRADE'
+	| 'INACTIVE'
+	| 'INVALID'
 	| 'UNKNOWN'
 
 // === Schema
@@ -93,6 +98,32 @@ export interface StoreDefinition {
 export type StoresShape = Readonly<Record<string, StoreDefinition>>
 
 /**
+ * The escape hatch into a version-change upgrade, passed to
+ * `IndexedDBDatabaseOptions.upgrade`.
+ *
+ * @remarks
+ * Runs INSIDE `onupgradeneeded`, after the built-in create-missing-stores pass —
+ * so `stores` already reflects any store just created from the declared schema.
+ * `transaction` is the raw versionchange `IDBTransaction`, the escape hatch for
+ * native operations this wrapper does not model directly (creating or dropping an
+ * index on an EXISTING store, or anything else the raw API offers); `old` /
+ * `version` are the prior and target database versions (`old` is `0` on first
+ * create); `create` / `drop` add or remove a whole store; `store` reaches a
+ * transaction-bound store for data migration. Everything invoked here must stay
+ * within the versionchange transaction — no non-IDB `await`, or it auto-commits
+ * and the upgrade fails.
+ */
+export interface IndexedDBUpgradeContext {
+	readonly transaction: IDBTransaction
+	readonly old: number
+	readonly version: number
+	readonly stores: readonly string[]
+	create(name: string, definition: StoreDefinition): void
+	drop(name: string): void
+	store(name: string): IndexedDBTransactionStoreInterface
+}
+
+/**
  * Options for `createIndexedDBDatabase`.
  *
  * @remarks
@@ -101,12 +132,16 @@ export type StoresShape = Readonly<Record<string, StoreDefinition>>
  * that creates any missing `stores`); omit it for **auto-managed** mode, where the
  * database opens at its current version and bumps once to create any declared store
  * the stored schema is missing — so adding a store never needs a manual version
- * bump.
+ * bump. `upgrade` runs after the built-in create-missing-stores pass, inside the
+ * same versionchange transaction — use it to drop a store, add or remove an index
+ * on an existing store (via `context.transaction`), or migrate data with
+ * `context.store(name)`.
  */
 export interface IndexedDBDatabaseOptions<Stores extends StoresShape = StoresShape> {
 	readonly name: string
 	readonly version?: number
 	readonly stores: Stores
+	readonly upgrade?: (context: IndexedDBUpgradeContext) => void
 }
 
 /**
