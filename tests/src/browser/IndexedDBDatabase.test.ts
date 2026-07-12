@@ -231,7 +231,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		expect(await v2.store('users').get('u1')).toEqual({ id: 'u1', name: 'Ada' })
 	})
 
-	it('adds an index to an existing store via the raw versionchange transaction', async () => {
+	it('adds an index to an existing store via context.index', async () => {
 		const name = uniqueName()
 		await deleteDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
@@ -247,7 +247,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			version: 2,
 			stores: { users: { path: 'id', indexes: [{ name: 'byName', path: 'name' }] } },
 			upgrade: (context) => {
-				context.transaction.objectStore('users').createIndex('byName', 'name')
+				context.index('users', { name: 'byName', path: 'name' })
 			},
 		})
 		cleanups.push(async () => {
@@ -256,6 +256,76 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		})
 		await v2.connect()
 		expect(await v2.store('users').index('byName').get('Bea')).toEqual({ id: 'u2', name: 'Bea' })
+	})
+
+	it('adds a unique index to a store created in the same upgrade via context.create', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' } },
+			upgrade: (context) => {
+				context.create('logs', { path: 'id' })
+				context.index('logs', { name: 'byMessage', path: 'message', unique: true })
+			},
+		})
+		cleanups.push(async () => {
+			v2.close()
+			await deleteDatabase(name)
+		})
+		await v2.connect()
+
+		const write = v2.database.transaction(['logs'], 'readwrite')
+		write.objectStore('logs').put({ id: 'l1', message: 'hi' })
+		await promisifyTransaction(write)
+
+		const read = v2.database.transaction(['logs'], 'readonly')
+		const record = await promisifyRequest(read.objectStore('logs').index('byMessage').get('hi'))
+		expect(record).toEqual({ id: 'l1', message: 'hi' })
+
+		// The index is unique: a second record with the same indexed value faults
+		// the put request itself with a native ConstraintError.
+		const duplicate = v2.database.transaction(['logs'], 'readwrite')
+		const caught = await promisifyRequest(
+			duplicate.objectStore('logs').put({ id: 'l2', message: 'hi' }),
+		).catch((error: unknown) => error)
+		expect(caught).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(caught)).toBe('CONSTRAINT')
+	})
+
+	it('removes an index via context.deindex', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const v1 = createIndexedDBDatabase({
+			name,
+			version: 1,
+			stores: { users: { path: 'id', indexes: [{ name: 'byName', path: 'name' }] } },
+		})
+		await v1.connect()
+		await v1.store('users').set({ id: 'u1', name: 'Ada' })
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' } },
+			upgrade: (context) => {
+				context.deindex('users', 'byName')
+			},
+		})
+		cleanups.push(async () => {
+			v2.close()
+			await deleteDatabase(name)
+		})
+		await v2.connect()
+		const read = v2.database.transaction(['users'], 'readonly')
+		expect(read.objectStore('users').indexNames.contains('byName')).toBe(false)
+		await promisifyTransaction(read)
 	})
 
 	it('migrates data within the upgrade transaction via context.store', async () => {

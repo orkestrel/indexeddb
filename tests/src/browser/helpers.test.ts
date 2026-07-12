@@ -1,4 +1,5 @@
 import {
+	createIndex,
 	hasKey,
 	IndexedDBError,
 	isIndexedDBError,
@@ -11,7 +12,13 @@ import {
 	wrapError,
 } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createCleanups, createTestDatabase, errorCode } from '../../setupBrowser.js'
+import {
+	createCleanups,
+	createTestDatabase,
+	deleteDatabase,
+	errorCode,
+	uniqueName,
+} from '../../setupBrowser.js'
 
 // The browser surface's helpers (`src/browser/helpers.ts`), exercised in real
 // Chromium: the feature probe `isIndexedDBSupported` (the entry gate a consumer
@@ -170,6 +177,55 @@ describe('readRecord / readRecords / hasKey — over a real store', () => {
 			expect(await hasKey(native, 'x')).toBe(true)
 			expect(await hasKey(native, 'nope')).toBe(false)
 		})
+	})
+})
+
+describe('createIndex — index-DDL leaf', () => {
+	it('translates an IndexDefinition into a native createIndex call, honouring unique / multiple', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const opened = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = globalThis.indexedDB.open(name, 1)
+			request.onupgradeneeded = () => {
+				const store = request.result.createObjectStore('tags', { keyPath: 'id' })
+				createIndex(store, { name: 'byLabel', path: 'label', unique: true })
+				createIndex(store, { name: 'byWord', path: 'words', multiple: true })
+			}
+			request.onsuccess = () => resolve(request.result)
+			request.onerror = () => reject(request.error)
+		})
+		cleanups.push(async () => {
+			opened.close()
+			await deleteDatabase(name)
+		})
+
+		const readTx = opened.transaction(['tags'], 'readonly')
+		const store = readTx.objectStore('tags')
+		const byLabel = store.index('byLabel')
+		expect(byLabel.unique).toBe(true)
+		expect(byLabel.multiEntry).toBe(false)
+		const byWord = store.index('byWord')
+		expect(byWord.unique).toBe(false)
+		expect(byWord.multiEntry).toBe(true)
+		await promisifyTransaction(readTx)
+
+		const write = opened.transaction(['tags'], 'readwrite')
+		write.objectStore('tags').put({ id: 't1', label: 'x', words: ['a', 'b'] })
+		await promisifyTransaction(write)
+
+		const check = opened.transaction(['tags'], 'readonly')
+		const tagsStore = check.objectStore('tags')
+		expect(await promisifyRequest(tagsStore.index('byLabel').get('x'))).toEqual({
+			id: 't1',
+			label: 'x',
+			words: ['a', 'b'],
+		})
+		expect(await promisifyRequest(tagsStore.index('byWord').get('a'))).toEqual({
+			id: 't1',
+			label: 'x',
+			words: ['a', 'b'],
+		})
+		await promisifyTransaction(check)
 	})
 })
 

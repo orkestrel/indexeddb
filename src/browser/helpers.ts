@@ -1,4 +1,4 @@
-import type { Row } from './types.js'
+import type { IndexDefinition, Row } from './types.js'
 import { isRecord } from '@orkestrel/contract'
 import { ERROR_CODES } from './constants.js'
 import { IndexedDBError } from './errors.js'
@@ -155,6 +155,27 @@ export async function hasKey(
 	key: IDBValidKey,
 ): Promise<boolean> {
 	return (await promisifyRequest(guardSync(() => source.count(key)))) > 0
+}
+
+/**
+ * Create a secondary index on a store from its {@link IndexDefinition}.
+ *
+ * @remarks
+ * The shared index-DDL leaf used both by the built-in create-missing-stores pass
+ * (`IndexedDBDatabase`'s internal store creation) and by an upgrade's
+ * `context.index`: translate the definition's `path` to a native key path and
+ * `unique` / `multiple` to `unique` / `multiEntry`, then issue `createIndex`.
+ * Versionchange-only — `store` must be inside an active upgrade transaction.
+ *
+ * @param store - The object store to add the index to
+ * @param definition - The index to create
+ */
+export function createIndex(store: IDBObjectStore, definition: IndexDefinition): void {
+	const keyPath = typeof definition.path === 'string' ? definition.path : [...definition.path]
+	store.createIndex(definition.name, keyPath, {
+		unique: definition.unique ?? false,
+		multiEntry: definition.multiple ?? false,
+	})
 }
 
 /**

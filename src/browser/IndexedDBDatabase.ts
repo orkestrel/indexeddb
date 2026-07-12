@@ -9,7 +9,7 @@ import type {
 	StoresShape,
 } from './types.js'
 import { IndexedDBError } from './errors.js'
-import { guardSync, promisifyTransaction } from './helpers.js'
+import { createIndex, guardSync, promisifyTransaction } from './helpers.js'
 import { IndexedDBStore } from './IndexedDBStore.js'
 import { IndexedDBTransaction } from './IndexedDBTransaction.js'
 import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
@@ -280,6 +280,12 @@ export class IndexedDBDatabase<
 				database.deleteObjectStore(name)
 			},
 			store: (name) => new IndexedDBTransactionStore(transaction.objectStore(name)),
+			index: (store, definition) => {
+				createIndex(transaction.objectStore(store), definition)
+			},
+			deindex: (store, name) => {
+				transaction.objectStore(store).deleteIndex(name)
+			},
 		}
 	}
 
@@ -290,11 +296,7 @@ export class IndexedDBDatabase<
 		}
 		const store = database.createObjectStore(name, options)
 		for (const index of definition.indexes ?? []) {
-			const keyPath = typeof index.path === 'string' ? index.path : [...index.path]
-			store.createIndex(index.name, keyPath, {
-				unique: index.unique ?? false,
-				multiEntry: index.multiple ?? false,
-			})
+			createIndex(store, index)
 		}
 	}
 }

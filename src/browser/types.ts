@@ -109,13 +109,13 @@ export type StoresShape = Readonly<Record<string, StoreDefinition>>
  * Runs INSIDE `onupgradeneeded`, after the built-in create-missing-stores pass —
  * so `stores` already reflects any store just created from the declared schema.
  * `transaction` is the raw versionchange `IDBTransaction`, the escape hatch for
- * native operations this wrapper does not model directly (creating or dropping an
- * index on an EXISTING store, or anything else the raw API offers); `old` /
+ * anything the raw API offers that this wrapper does not model directly; `old` /
  * `version` are the prior and target database versions (`old` is `0` on first
- * create); `create` / `drop` add or remove a whole store; `store` reaches a
- * transaction-bound store for data migration. Everything invoked here must stay
- * within the versionchange transaction — no non-IDB `await`, or it auto-commits
- * and the upgrade fails.
+ * create); `create` / `drop` add or remove a whole store; `index` / `deindex` add
+ * or remove a secondary index on a store; `store` reaches a transaction-bound
+ * store for data migration. Everything invoked here must stay within the
+ * versionchange transaction — no non-IDB `await`, or it auto-commits and the
+ * upgrade fails.
  */
 export interface IndexedDBUpgradeContext {
 	readonly transaction: IDBTransaction
@@ -125,6 +125,40 @@ export interface IndexedDBUpgradeContext {
 	create(name: string, definition: StoreDefinition): void
 	drop(name: string): void
 	store(name: string): IndexedDBTransactionStoreInterface
+	/**
+	 * Create a secondary index on `store`.
+	 *
+	 * @param store - Name of an existing store, or one just created in this same upgrade via `create`.
+	 * @param definition - The index to add — {@link IndexDefinition}.
+	 * @remarks
+	 * Versionchange-only: `store` must already exist within the current upgrade
+	 * transaction (either declared in the schema, created earlier in the same
+	 * upgrade, or already present from a prior version). Mirrors the index
+	 * translation the built-in schema pass applies to a store's declared
+	 * `indexes`.
+	 * @example
+	 * ```ts
+	 * upgrade(context) {
+	 *   context.index('books', { name: 'byAuthor', path: 'author' })
+	 * }
+	 * ```
+	 */
+	index(store: string, definition: IndexDefinition): void
+	/**
+	 * Remove a named index from `store`.
+	 *
+	 * @param store - Name of an existing store within the current upgrade transaction.
+	 * @param name - The index name to remove.
+	 * @remarks
+	 * Versionchange-only, same constraint as `index`.
+	 * @example
+	 * ```ts
+	 * upgrade(context) {
+	 *   context.deindex('books', 'byAuthor')
+	 * }
+	 * ```
+	 */
+	deindex(store: string, name: string): void
 }
 
 /**
@@ -138,7 +172,7 @@ export interface IndexedDBUpgradeContext {
  * the stored schema is missing — so adding a store never needs a manual version
  * bump. `upgrade` runs after the built-in create-missing-stores pass, inside the
  * same versionchange transaction — use it to drop a store, add or remove an index
- * on an existing store (via `context.transaction`), or migrate data with
+ * on any store with `context.index` / `context.deindex`, or migrate data with
  * `context.store(name)`. It may return `void` or a `Promise<void>` — an async
  * `upgrade` may `await` the IDB requests it issues through `context.store(...)`
  * (see the auto-commit rule on {@link IndexedDBUpgradeContext}); a rejection
