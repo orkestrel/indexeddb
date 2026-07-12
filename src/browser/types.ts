@@ -1,18 +1,26 @@
-import type { Row } from '@src/core'
-
 // The lean browser-native IndexedDB surface — a typed, Promise-based wrapper over
 // the raw `IDBDatabase` / `IDBObjectStore` / `IDBIndex` / `IDBTransaction` API.
-// It exposes the capabilities the core database layer CANNOT express over its
-// portable `scan` — secondary indexes, native key ranges, cursors, and native
-// multi-store transactions — and nothing it can: there is **no** query / filter /
-// sort / aggregate builder here (that is the core engine, running over `scan`).
-// The IndexedDB `DriverInterface` is built on this wrapper; standalone browser
-// code can use it directly. Types are the source of truth (AGENTS §2).
+// There is no cross-environment database layer in this package — no query /
+// filter / sort / aggregate builder here, only what raw IndexedDB offers
+// natively: object stores, secondary indexes, native key ranges, cursors, and
+// native multi-store transactions. Types are the source of truth (AGENTS §2).
 //
-// Values are the core `Row` (a record), narrowed from IndexedDB's structured
-// clone with `isRecord` at the read boundary — the same `as`-free bridge the core
-// driver uses. Keys are the full native `IDBValidKey` (a superset of the core
-// `Key`), so the wrapper speaks IndexedDB's whole key space.
+// Values are this package's own `Row` (a record), narrowed from IndexedDB's
+// structured clone with `isRecord` at the read boundary — an `as`-free bridge.
+// Keys are the full native `IDBValidKey`, so the wrapper speaks IndexedDB's
+// whole key space.
+
+// === Row
+
+/**
+ * A record stored in, and read from, an object store.
+ *
+ * @remarks
+ * The value shape every store / index / transaction-store CRUD method reads and
+ * writes. A structured-clone value narrowed with `isRecord` at the read
+ * boundary (see `helpers.ts`), never an unchecked cast.
+ */
+export type Row = Record<string, unknown>
 
 // === Errors
 
@@ -71,8 +79,8 @@ export interface IndexDefinition {
  *
  * @remarks
  * `path` is the in-line key path (omit it for an **out-of-line** store, where the
- * key is passed explicitly to `set` / `add` — what the database driver uses);
- * `increment` auto-generates numeric keys; `indexes` declares secondary indexes.
+ * key is passed explicitly to `set` / `add`); `increment` auto-generates numeric
+ * keys; `indexes` declares secondary indexes.
  * Stores are created from these definitions inside `onupgradeneeded`.
  */
 export interface StoreDefinition {
@@ -93,7 +101,7 @@ export type StoresShape = Readonly<Record<string, StoreDefinition>>
  * that creates any missing `stores`); omit it for **auto-managed** mode, where the
  * database opens at its current version and bumps once to create any declared store
  * the stored schema is missing — so adding a store never needs a manual version
- * bump. Auto-managed mode is what the database `DriverInterface` uses.
+ * bump.
  */
 export interface IndexedDBDatabaseOptions<Stores extends StoresShape = StoresShape> {
 	readonly name: string

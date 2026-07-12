@@ -1,32 +1,33 @@
-# @orkestrel/router
+# @orkestrel/indexeddb
 
-A typed request router for the `@orkestrel` line — the first `@orkestrel`
-package to ship both server and browser environments alongside its shared
-core. Built to sit beside `@orkestrel/contract` (validation) and
-`@orkestrel/emitter` (observable lifecycle), reusing both as it takes shape.
+A typed, Promise-based wrapper over browser IndexedDB — object stores,
+secondary indexes, native key ranges, promisified cursors, and versioned
+schema upgrades, over `await` instead of raw `IDBRequest` events. Part of the
+`@orkestrel` line.
 
 ## Install
 
 ```sh
-npm install @orkestrel/router
+npm install @orkestrel/indexeddb
 ```
 
 ## Requirements
 
-- Node.js >= 24
+- Node.js >= 24 (build/test tooling)
 - ESM-only (no CommonJS build)
-- Server and browser environments both supported
+- A browser environment with `IndexedDB` (feature-detect with
+  `isIndexedDBSupported` before opening a database)
 
 ## Status
 
-The public API is under design and not yet implemented — this package
-currently ships no runtime code. This README will gain an install snippet,
-usage examples, and a guide link once the design lands.
+Pre-release. The public API is implemented and tested against a real
+Chromium instance; see the [guide](guides/src/indexeddb.md) for the full
+surface, patterns, and invariants.
 
 ## Package
 
-Published as three environment-scoped entry points per the `exports` field in
-`package.json`: a shared core, `./browser`, and `./server`.
+Published as a single, browser-only ESM entry point per the `exports` field
+in `package.json` — no server or Node-only build.
 
 ## License
 

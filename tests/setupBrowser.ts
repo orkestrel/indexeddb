@@ -1,82 +1,23 @@
-// Browser-test setup — DOM/Vue-only helpers, loaded second after `setup.ts`
-// for the `src:browser` / `app:browser` projects. Loads the app's REAL
-// cascade — Halfmoon plus its modern core, exactly what main.scss ships —
-// so component tests assert resolved styles against what production renders.
-// Real DOM, real events, real layout — do not mock browser APIs. Centralize
-// DOM fixture builders and event factories here once used in more than one
-// test file.
+// Browser-test setup — DOM/IndexedDB-only helpers, loaded second after
+// `setup.ts` for the `src:browser` project. Real DOM, real `indexedDB` — do
+// not mock browser APIs. Centralize DOM fixture builders and event factories
+// here once used in more than one test file.
 
 import type {
 	IndexedDBCursorInterface,
 	IndexedDBDatabaseInterface,
 	StoresShape,
 } from '@src/browser'
-import type { DatabaseInterface } from '@src/core'
-import { createIndexedDBDatabase, createIndexedDBDriver, IndexedDBError } from '@src/browser'
-import { createDatabase } from '@src/core'
-import { INTEGRATION_TABLES } from './setup.js'
-import 'halfmoon/css/halfmoon.css'
-import 'halfmoon/css/cores/halfmoon.modern.css'
-import { afterEach } from 'vitest'
-
-// The app's index.html activates the modern core on <html>; tests mirror it
-// or every [data-bs-core=modern] rule in the loaded cascade stays inert.
-document.documentElement.setAttribute('data-bs-core', 'modern')
-
-// Per-test teardown registry — every helper that mounts a node registers its
-// cleanup here so the DOM never leaks between tests. Sync disposers only —
-// `afterEach` below drains it synchronously; async cleanup (closing/deleting
-// a database, awaiting a disposer) goes through {@link createCleanups}
-// instead, whose `run()` awaits each disposer in order.
-export const TEARDOWNS: Array<() => void> = []
-
-afterEach(() => {
-	while (TEARDOWNS.length > 0) TEARDOWNS.pop()?.()
-	document.body.replaceChildren()
-})
-
-// Append an element to `document.body` (so the cascade applies) and register
-// automatic cleanup. Returns the element for chaining.
-export function mount<T extends Element>(element: T): T {
-	document.body.append(element)
-	TEARDOWNS.push(() => element.remove())
-	return element
-}
-
-// ── Browser event factories (AGENTS §16.2) ────────────────────────────────
-
-/**
- * Set an input's `value` and dispatch a real bubbling `input` event — the
- * no-blur / draft-typing path a component's `input` listener observes.
- *
- * @param input - The input element to type into
- * @param value - The value to set before dispatching
- */
-export function typeInput(input: HTMLInputElement, value: string): void {
-	input.value = value
-	input.dispatchEvent(new Event('input', { bubbles: true }))
-}
-
-/**
- * Type `value` via {@link typeInput}, then dispatch a real bubbling `change`
- * event — the blur-time commit path a component's `change` listener observes.
- *
- * @param input - The input element to type into and commit
- * @param value - The value to set before dispatching
- */
-export function commitInput(input: HTMLInputElement, value: string): void {
-	typeInput(input, value)
-	input.dispatchEvent(new Event('change', { bubbles: true }))
-}
+import { createIndexedDBDatabase, IndexedDBError } from '@src/browser'
 
 // ── IndexedDB test fixtures (real Chromium, real `indexedDB`) ────────────────
 //
-// The shared open-a-database boilerplate every `src/browser/indexeddb` (and
-// `src/browser/databases`) test reuses (AGENTS §16.1): a unique database name
-// per call, a connected handle over a caller-supplied store schema, and a
-// cleanup that closes the connection and deletes the database — so the suite is
-// order- and rerun-independent without a per-file local opener. Each test keeps
-// only its file-specific store / index definitions, passed in as the schema.
+// The shared open-a-database boilerplate every `src/browser` test reuses
+// (AGENTS §16.1): a unique database name per call, a connected handle over a
+// caller-supplied store schema, and a cleanup that closes the connection and
+// deletes the database — so the suite is order- and rerun-independent without a
+// per-file local opener. Each test keeps only its file-specific store / index
+// definitions, passed in as the schema.
 
 /**
  * Delete an IndexedDB database, resolving once the request settles, so a test
@@ -120,8 +61,7 @@ export interface TestDatabaseInterface<Stores extends StoresShape> {
 
 /**
  * Open a fresh, connected IndexedDB database over a store schema, under a unique
- * name, returning the handle and a cleanup — the shared opener for every browser
- * `indexeddb` test (AGENTS §16.1). The handle is already connected, so a test can
+ * name, returning the handle and a cleanup — the shared opener for every browser test (AGENTS §16.1). The handle is already connected, so a test can
  * reach `db.store(...)` immediately; `cleanup` closes and deletes it.
  *
  * @param stores - The store schema (file-specific store / index definitions)
@@ -182,7 +122,7 @@ export function errorCode(value: unknown): string | undefined {
 
 // ── IndexedDB seed fixtures (the common stores every wrapper test starts from) ─
 //
-// The near-duplicate seed-a-`users`-store openers the `src/browser/indexeddb` tests
+// The near-duplicate seed-a-`users`-store openers the `src/browser` tests
 // reuse (AGENTS §16.1): each opens a uniquely-named database via
 // {@link createTestDatabase}, sets the rows, and registers its `cleanup` through the
 // caller's teardown registrar (so the file keeps its own `cleanups` array + the
@@ -204,7 +144,7 @@ export interface CleanupRegistrarInterface {
 
 /**
  * Build a teardown registrar replacing the hand-rolled per-file `cleanups[]` +
- * `afterEach` loop every `indexeddb` / cross-driver `databases` test repeats
+ * `afterEach` loop every `src/browser` test repeats
  * (AGENTS §16.1). Push disposers as a test opens resources; wire `registrar.run`
  * into an `afterEach`. Disposers run in REGISTRATION order — the order an
  * IndexedDB connection/transaction close can depend on — and are forgotten after,
@@ -282,45 +222,4 @@ export async function seedStore(
 		{ id: 'c', n: 3 },
 	])
 	return db
-}
-
-// ── Cross-driver integration fixture (core database over the IndexedDB driver) ─
-//
-// The fresh-name + open-over-`INTEGRATION_TABLES` + cleanup opener the cross-driver
-// integration test reuses (AGENTS §16.1): binding `createIndexedDBDriver` to the core
-// `createDatabase` over the shared `INTEGRATION_TABLES` (tests/setup.ts), returning
-// the handle, its name (for a reopen test), and a cleanup that closes the connection
-// and deletes the database.
-
-/** A core `Database` over the IndexedDB driver plus the boilerplate to name and
- *  dispose it — the cross-driver integration fixture. */
-export interface IntegrationDatabaseInterface {
-	/** The core `Database`, opened over `INTEGRATION_TABLES` via the IndexedDB driver. */
-	readonly db: DatabaseInterface<typeof INTEGRATION_TABLES>
-	/** The unique IndexedDB name the database was opened under (for reopen tests). */
-	readonly name: string
-	/** Close the connection and delete the underlying IndexedDB database. */
-	cleanup(): Promise<void>
-}
-
-/**
- * Open the core database + relations stack over the IndexedDB driver, under a unique
- * name, returning the handle, its name, and a cleanup — the shared opener for the
- * cross-driver integration test, over the shared `INTEGRATION_TABLES` fixture
- * (tests/setup.ts), so a second backend's integration test can prove
- * driver-parity over identical tables.
- *
- * @returns The connected database, its IndexedDB name, and a cleanup
- */
-export function createIntegrationDatabase(): IntegrationDatabaseInterface {
-	const name = uniqueName('terrain-idb-int')
-	const db = createDatabase({
-		driver: createIndexedDBDriver(name),
-		tables: INTEGRATION_TABLES,
-	})
-	const cleanup = async (): Promise<void> => {
-		await db.close()
-		await deleteDatabase(name)
-	}
-	return { db, name, cleanup }
 }

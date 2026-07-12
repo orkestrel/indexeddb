@@ -1,11 +1,6 @@
 import { range } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import {
-	createCleanups,
-	createTestDatabase,
-	drainCursor,
-	seedStore,
-} from '../../../setupBrowser.js'
+import { createCleanups, createTestDatabase, drainCursor, seedStore } from '../../setupBrowser.js'
 
 // `IndexedDBCursorInterface` in real Chromium, obtained from a store or index
 // cursor: the position snapshot (`cursor` / `source` / `key` / `primary` /

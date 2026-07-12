@@ -1,11 +1,6 @@
 import { IndexedDBError, range } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import {
-	createCleanups,
-	createTestDatabase,
-	drainCursor,
-	errorCode,
-} from '../../../setupBrowser.js'
+import { createCleanups, createTestDatabase, drainCursor, errorCode } from '../../setupBrowser.js'
 
 // `IndexedDBTransactionStoreInterface` in real Chromium, reached through
 // `tx.store(name)` inside a `db.read` / `db.write` scope: the live `store`

@@ -1,21 +1,23 @@
 {
-	"name": "@orkestrel/router",
+	"name": "@orkestrel/indexeddb",
 	"version": "0.0.1",
-	"description": "A typed request router for the @orkestrel line — server and browser environments. Part of the @orkestrel line.",
+	"description": "A typed, Promise-based wrapper over browser IndexedDB — object stores, secondary indexes, native key ranges, cursors, and versioned schema upgrades. Part of the @orkestrel line.",
 	"keywords": [
 		"browser",
-		"router",
-		"routing",
-		"server",
-		"typescript",
-		"url"
+		"cursor",
+		"idb",
+		"indexeddb",
+		"key-range",
+		"object-store",
+		"storage",
+		"typescript"
 	],
-	"homepage": "https://github.com/orkestrel/router#readme",
-	"bugs": "https://github.com/orkestrel/router/issues",
+	"homepage": "https://github.com/orkestrel/indexeddb#readme",
+	"bugs": "https://github.com/orkestrel/indexeddb/issues",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/orkestrel/router.git"
+		"url": "git+https://github.com/orkestrel/indexeddb.git"
 	},
 	"files": [
 		"dist",
@@ -23,15 +25,10 @@
 	],
 	"type": "module",
 	"sideEffects": false,
-	"main": "./dist/src/core/index.js",
-	"types": "./dist/src/core/index.d.ts",
+	"main": "./dist/src/browser/index.js",
+	"types": "./dist/src/browser/index.d.ts",
 	"exports": {
 		".": {
-			"types": "./dist/src/core/index.d.ts",
-			"import": "./dist/src/core/index.js",
-			"default": "./dist/src/core/index.js"
-		},
-		"./browser": {
 			"types": "./dist/src/browser/index.d.ts",
 			"import": "./dist/src/browser/index.js",
 			"default": "./dist/src/browser/index.js"
@@ -47,22 +44,19 @@
 		"tmp:txt": "node -e \"const fs=require('node:fs'),p=require('node:path');function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory()){walk(f)}else if(!e.name.endsWith('.md')&&!e.name.endsWith('.txt')){const t=f+'.txt';if(!fs.existsSync(t)){fs.renameSync(f,t)}else{console.warn('Skipping '+f+' — target exists: '+t)}}}}try{walk('tmp')}catch(e){if(e.code!=='ENOENT')throw e}\"",
 		"lint": "oxlint --config .oxlintrc.json --fix .",
 		"check": "tsc --noEmit --project tsconfig.json",
-		"check:src": "npm run check:src:core && npm run check:src:browser",
-		"check:src:core": "tsc --noEmit -p configs/src/tsconfig.core.json",
+		"check:src": "npm run check:src:browser",
 		"check:src:browser": "tsc --noEmit -p configs/src/tsconfig.browser.json",
 		"format": "oxfmt --config .oxfmtrc.json --write .",
 		"format:check": "oxfmt --config .oxfmtrc.json --check .",
 		"lint:check": "oxlint --config .oxlintrc.json .",
 		"test": "npm run test:src && npm run test:guides",
-		"test:src": "vitest run --config vite.config.ts --no-cache --reporter=dot --project src:core --project src:browser",
-		"test:src:core": "vitest run --config vite.config.ts --no-cache --reporter=dot --project src:core",
+		"test:src": "vitest run --config vite.config.ts --no-cache --reporter=dot --project src:browser",
 		"test:src:browser": "vitest run --config vite.config.ts --no-cache --reporter=dot --project src:browser",
 		"test:guides": "vitest run --config vite.config.ts --reporter=dot --project guides",
 		"build": "npm run clean && npm run build:src",
-		"build:src": "npm run build:src:core && npm run build:src:browser",
-		"build:src:core": "vite build --config configs/src/vite.core.config.ts && tsc -p configs/src/tsconfig.core.json",
+		"build:src": "npm run build:src:browser",
 		"build:src:browser": "vite build --config configs/src/vite.browser.config.ts && tsc -p configs/src/tsconfig.browser.json",
-		"prepublishOnly": "npm run format:check && npm run lint:check && npm run check && npm run check && npm run build && npm test"
+		"prepublishOnly": "npm run format:check && npm run lint:check && npm run check && npm run check:src && npm run build && npm test"
 	},
 	"dependencies": {
 		"@orkestrel/abort": "^0.0.1",

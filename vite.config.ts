@@ -54,8 +54,10 @@ const resolve = {
 	),
 }
 
-// Base: shared resolve + build defaults + src:core tests.
-export const srcCore = (config?: UserConfig): UserConfig =>
+// Base: the published browser-only library (`src/browser`, the typed IndexedDB
+// wrapper). Builds an ES lib and runs its tests in a real Chromium via
+// Playwright, where DOM and `indexedDB` are available.
+export const srcBrowser = (config?: UserConfig): UserConfig =>
 	mergeConfig(
 		{
 			resolve,
@@ -63,69 +65,41 @@ export const srcCore = (config?: UserConfig): UserConfig =>
 				emptyOutDir: true,
 				sourcemap: true,
 				minify: false,
+				lib: {
+					entry: resolveWorkspacePath('src/browser/index.ts'),
+					formats: ['es'],
+					fileName: () => 'index.js',
+				},
+				outDir: 'dist/src/browser',
 			},
 			test: {
-				name: { label: 'src:core', color: 'magenta' },
-				include: ['tests/src/core/**/*.test.ts'],
-				setupFiles: ['./tests/setup.ts'],
-				environment: 'node',
-				browser: { enabled: false },
+				name: { label: 'src:browser', color: 'yellow' },
+				include: ['tests/src/browser/**/*.test.ts'],
+				setupFiles: ['./tests/setup.ts', './tests/setupBrowser.ts'],
+				browser: {
+					enabled: true,
+					provider: createBrowserProvider(),
+					instances: [{ browser: 'chromium', headless: true }],
+				},
+				fileParallelism: false,
 			},
 		},
 		config ?? {},
 	)
 
-// Extends srcCore: the guides-parity suite. Node env — it reads the real
-// guides/*.md and the documented source modules off disk — but resolves like core tests.
+// Extends srcBrowser: the guides-parity suite. Node env — it reads the real
+// guides/*.md and the documented source modules off disk — but resolves like
+// the browser project.
 export const guides = (config?: UserConfig): UserConfig =>
-	srcCore(
+	srcBrowser(
 		mergeConfig(
 			{
 				test: {
 					name: { label: 'guides', color: 'green' },
 					include: ['tests/guides/**/*.test.ts'],
 					exclude: ['tests/src/**/*.test.ts', 'tests/setup.test.ts'],
-				},
-			},
-			config ?? {},
-		),
-	)
-
-// Extends srcCore: browser-only library (`src/browser`, e.g. the IndexedDB
-// driver). Builds an ES lib and runs its tests in a real Chromium via
-// Playwright, where DOM and `indexedDB` are available. No Vue — this surface is
-// plain TypeScript; add the plugin here if a browser app surface ever needs it.
-export const srcBrowser = (config?: UserConfig): UserConfig =>
-	srcCore(
-		mergeConfig(
-			{
-				build: {
-					lib: {
-						entry: resolveWorkspacePath('src/browser/index.ts'),
-						formats: ['es'],
-						fileName: () => 'index.js',
-					},
-					outDir: 'dist/src/browser',
-					// The browser lib and the core lib ship as two subpaths of one package,
-					// so the published build references the sibling `dist/src/core` (CJS)
-					// instead of inlining a copy. Build-only — the test project below
-					// resolves `@src/core` from source through the shared `resolve` alias.
-					rolldownOptions: {
-						external: (id: string) => id === '@src/core',
-						output: { paths: { '@src/core': '../core/index.cjs' } },
-					},
-				},
-				test: {
-					name: { label: 'src:browser', color: 'yellow' },
-					include: ['tests/src/browser/**/*.test.ts'],
-					exclude: ['tests/src/core/**/*.test.ts'],
-					setupFiles: ['./tests/setup.ts', './tests/setupBrowser.ts'],
-					browser: {
-						enabled: true,
-						provider: createBrowserProvider(),
-						instances: [{ browser: 'chromium', headless: true }],
-					},
-					fileParallelism: false,
+					environment: 'node',
+					browser: { enabled: false },
 				},
 			},
 			config ?? {},
@@ -135,6 +109,6 @@ export const srcBrowser = (config?: UserConfig): UserConfig =>
 export default defineConfig({
 	resolve,
 	test: {
-		projects: [srcCore, srcBrowser, guides],
+		projects: [srcBrowser, guides],
 	},
 })

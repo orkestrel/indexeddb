@@ -1,4 +1,4 @@
-import { isArray } from '@src/core'
+import { isArray } from '@orkestrel/contract'
 import type {
 	IndexedDBDatabaseInterface,
 	IndexedDBDatabaseOptions,
@@ -20,10 +20,8 @@ import { IndexedDBTransaction } from './IndexedDBTransaction.js'
  * operation), creating any missing stores from their definitions inside
  * `onupgradeneeded`. `store` reaches a typed store; `read` / `write` run an atomic
  * scope over one or more stores, committing on resolve and rolling back on a throw;
- * `close` releases the connection and `drop` deletes the database. This is the
- * native browser surface — the IndexedDB `DriverInterface` is built on it, and
- * standalone code can use it directly. Schema changes beyond creating new stores
- * (dropping stores, altering indexes) are deferred.
+ * `close` releases the connection and `drop` deletes the database. Schema changes
+ * beyond creating new stores (dropping stores, altering indexes) are deferred.
  */
 export class IndexedDBDatabase<
 	Stores extends StoresShape = StoresShape,
@@ -172,8 +170,7 @@ export class IndexedDBDatabase<
 
 	// Open the connection: at the configured version, or — in auto-managed mode (no
 	// version) — at the database's current version, bumping once to create any
-	// declared store the stored schema is missing. The database `DriverInterface`
-	// relies on the auto-managed path, since `open(tables)` carries no version.
+	// declared store the stored schema is missing.
 	async #open(): Promise<IDBDatabase> {
 		let database = await this.#request(this.#version)
 		if (this.#version === undefined) {

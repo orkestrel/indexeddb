@@ -1,5 +1,12 @@
-// Public barrel for src/browser — plain-TypeScript browser utilities (no
-// Vue/DOM framework here; see app/browser for the Vue application shell).
+// Public barrel for src/browser — the typed, Promise-based IndexedDB wrapper.
+export type * from './types.js'
+export * from './constants.js'
+export * from './errors.js'
 export * from './helpers.js'
-export * from './databases/index.js'
-export * from './indexeddb/index.js'
+export * from './factories.js'
+export * from './IndexedDBDatabase.js'
+export * from './IndexedDBStore.js'
+export * from './IndexedDBIndex.js'
+export * from './IndexedDBCursor.js'
+export * from './IndexedDBTransaction.js'
+export * from './IndexedDBTransactionStore.js'

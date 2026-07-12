@@ -1,8 +1,8 @@
 import type { IndexedDBTransactionInterface } from '@src/browser'
 import { IndexedDBError } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { captureError } from '../../../setup.js'
-import { createCleanups, createTestDatabase, errorCode } from '../../../setupBrowser.js'
+import { captureError } from '../../setup.js'
+import { createCleanups, createTestDatabase, errorCode } from '../../setupBrowser.js'
 
 // `IndexedDBTransactionInterface` in real Chromium, obtained through the `scope`
 // callback of `db.read` / `db.write`: the metadata getters (`transaction` /

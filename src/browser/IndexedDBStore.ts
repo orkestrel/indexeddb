@@ -1,11 +1,11 @@
-import type { Row } from '@src/core'
-import { isArray } from '@src/core'
+import { isArray } from '@orkestrel/contract'
 import type {
 	CursorOptions,
 	IndexedDBCursorInterface,
 	IndexedDBIndexInterface,
 	IndexedDBStoreInterface,
 	KeyPath,
+	Row,
 	StoreDefinition,
 } from './types.js'
 import { IndexedDBError } from './errors.js'

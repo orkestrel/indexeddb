@@ -1,12 +1,7 @@
 import { IndexedDBError, range } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { captureError } from '../../../setup.js'
-import {
-	createCleanups,
-	createTestDatabase,
-	drainCursor,
-	errorCode,
-} from '../../../setupBrowser.js'
+import { captureError } from '../../setup.js'
+import { createCleanups, createTestDatabase, drainCursor, errorCode } from '../../setupBrowser.js'
 
 // `IndexedDBStoreInterface` in real Chromium, reached through `db.store(name)`:
 // the metadata getters (`name` / `path` / `indexes` / `increment`), the full

@@ -1,6 +1,5 @@
-import type { Row } from '@src/core'
-import { isRecord } from '@src/core'
-import type { IndexedDBCursorInterface } from './types.js'
+import { isRecord } from '@orkestrel/contract'
+import type { IndexedDBCursorInterface, Row } from './types.js'
 import { promisifyRequest } from './helpers.js'
 
 /**

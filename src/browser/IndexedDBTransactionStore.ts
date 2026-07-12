@@ -1,9 +1,9 @@
-import type { Row } from '@src/core'
-import { isArray } from '@src/core'
+import { isArray } from '@orkestrel/contract'
 import type {
 	CursorOptions,
 	IndexedDBCursorInterface,
 	IndexedDBTransactionStoreInterface,
+	Row,
 } from './types.js'
 import { IndexedDBError } from './errors.js'
 import { hasKey, promisifyRequest, readRecord, readRecords } from './helpers.js'

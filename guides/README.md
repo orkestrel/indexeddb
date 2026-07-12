@@ -5,17 +5,15 @@ directory (AGENTS §22).
 
 ## By concept
 
-| Concept | Spec                             | Source                                                                                    | Tests                                                                                                                         |
-| ------- | -------------------------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Router  | [`src/router.md`](src/router.md) | [`src/core`](../src/core), [`src/browser`](../src/browser), [`src/server`](../src/server) | [`tests/src/core`](../tests/src/core), [`tests/src/browser`](../tests/src/browser), [`tests/src/server`](../tests/src/server) |
+| Concept   | Spec                                   | Source                          | Tests                                       |
+| --------- | -------------------------------------- | ------------------------------- | ------------------------------------------- |
+| IndexedDB | [`src/indexeddb.md`](src/indexeddb.md) | [`src/browser`](../src/browser) | [`tests/src/browser`](../tests/src/browser) |
 
 ## By directory
 
-| Directory     | Guide                            |
-| ------------- | -------------------------------- |
-| `src/core`    | [`src/router.md`](src/router.md) |
-| `src/browser` | [`src/router.md`](src/router.md) |
-| `src/server`  | [`src/router.md`](src/router.md) |
+| Directory     | Guide                                  |
+| ------------- | -------------------------------------- |
+| `src/browser` | [`src/indexeddb.md`](src/indexeddb.md) |
 
 ## Dependency reference
 
@@ -49,4 +47,3 @@ the primitives it is built from without leaving this guide set.
 ## See also
 
 - [`AGENTS.md`](../AGENTS.md) — the rules; §22 documentation-as-contracts.
-</content>

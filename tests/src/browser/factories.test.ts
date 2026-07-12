@@ -1,8 +1,8 @@
 import { createIndexedDBDatabase, range } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createCleanups, deleteDatabase, uniqueName } from '../../../setupBrowser.js'
+import { createCleanups, deleteDatabase, uniqueName } from '../../setupBrowser.js'
 
-// `createIndexedDBDatabase` (`src/browser/indexeddb/factories.ts`) in real
+// `createIndexedDBDatabase` (`src/browser/factories.ts`) in real
 // Chromium: the factory returns a working `IndexedDBDatabaseInterface` — it
 // connects lazily, creates its declared stores and indexes, and round-trips
 // real data. This file pins the factory's product (the database test pins the

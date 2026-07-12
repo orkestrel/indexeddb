@@ -1,6 +1,6 @@
 # IndexedDB
 
-> The browser-native storage layer: a lean, typed, Promise-based wrapper over the raw `IDBDatabase` / `IDBObjectStore` / `IDBIndex` / `IDBTransaction` API. Its job is to turn IndexedDB's event-driven, callback-shaped, structurally-untyped surface into one you can `await` — and nothing more. So it exposes exactly the native capabilities the core [database](databases.md) engine **cannot** express over its portable `scan` — secondary indexes, native key ranges, promisified cursors, and native multi-store transactions — and deliberately **none** that it can: there is no `where` / `filter` / `order` / aggregate builder here. Filtering, sorting, and joining are the one core engine's job, running over `scan`; bolting a second query DSL onto the wrapper would just duplicate it (the reworked scsr package's standalone query / where-clause / aggregate classes are dropped here for exactly that reason). The IndexedDB [`DriverInterface`](databases.md) is built on this wrapper — it never touches raw IndexedDB — and standalone browser code that wants native power without the portability layer can use it directly. Source: [`src/browser/indexeddb`](../../src/browser/indexeddb). Surfaced through the `@src/browser` barrel.
+> A lean, typed, Promise-based wrapper over the raw browser `IDBDatabase` / `IDBObjectStore` / `IDBIndex` / `IDBTransaction` API. Its job is to turn IndexedDB's event-driven, callback-shaped, structurally-untyped surface into one you can `await` — and nothing more. It exposes exactly what raw IndexedDB offers natively — object stores, secondary indexes, native key ranges, promisified cursors, and native multi-store transactions — and deliberately nothing else: there is no `where` / `filter` / `order` / aggregate query builder here; that would just duplicate a general-purpose query engine this package does not ship. Source: [`src/browser`](../../src/browser). Surfaced through the `@src/browser` barrel (published as `@orkestrel/indexeddb`).
 
 ## Surface
 
@@ -49,6 +49,7 @@ await users.index('byAge').records(range.from(18)) // adults, index-backed (O(lo
 
 | API                    | Kind     | Summary                                                                                   |
 | ---------------------- | -------- | ----------------------------------------------------------------------------------------- |
+| `isIndexedDBSupported` | function | Whether IndexedDB is available in this environment (`globalThis.indexedDB`).              |
 | `promisifyRequest`     | function | Resolve an `IDBRequest` to its result, rejecting with an `IndexedDBError`.                |
 | `promisifyTransaction` | function | Resolve once an `IDBTransaction` commits, rejecting if it errors or aborts.               |
 | `readRecord`           | function | Read one record from a store or index by key, narrowed to a `Row` with `isRecord`.        |
@@ -68,6 +69,7 @@ await users.index('byAge').records(range.from(18)) // adults, index-backed (O(lo
 
 | API                                  | Kind      | Summary                                                                         |
 | ------------------------------------ | --------- | ------------------------------------------------------------------------------- |
+| `Row`                                | type      | A record stored in, and read from, an object store.                             |
 | `KeyPath`                            | type      | A key path — one field, or several for a compound key.                          |
 | `IndexDefinition`                    | interface | A secondary index's definition (`name` / `path` / `unique` / `multiple`).       |
 | `StoreDefinition`                    | interface | A store's schema (`path` / `increment` / `indexes`).                            |
@@ -82,9 +84,9 @@ await users.index('byAge').records(range.from(18)) // adults, index-backed (O(lo
 | `IndexedDBTransactionInterface`      | interface | The explicit-transaction contract.                                              |
 | `IndexedDBTransactionStoreInterface` | interface | The transaction-bound store contract.                                           |
 
-Values are the core `Row` (a record), narrowed from IndexedDB's structured clone with `isRecord` at the read boundary — the same `as`-free bridge the core driver uses. Keys are the full native `IDBValidKey` (a superset of the core `Key`), so the wrapper speaks IndexedDB's whole key space.
+Values are this package's own `Row` (a record), narrowed from IndexedDB's structured clone with `isRecord` (from `@orkestrel/contract`) at the read boundary — an `as`-free bridge. Keys are the full native `IDBValidKey`, so the wrapper speaks IndexedDB's whole key space.
 
-A database connects **lazily**: the first store operation (or an explicit `connect`) opens it; you never wire up `onsuccess` yourself. `version` controls schema creation: pin an explicit number to create any missing stores on a bump, or **omit it** for auto-managed mode, where the database opens at its current version and bumps once on its own to create any declared store the stored schema lacks — so adding a store never needs a manual version bump. Auto-managed mode is what the database `DriverInterface` runs on.
+A database connects **lazily**: the first store operation (or an explicit `connect`) opens it; you never wire up `onsuccess` yourself. `version` controls schema creation: pin an explicit number to create any missing stores on a bump, or **omit it** for auto-managed mode, where the database opens at its current version and bumps once on its own to create any declared store the stored schema lacks — so adding a store never needs a manual version bump.
 
 ## Methods
 
@@ -174,30 +176,24 @@ The transaction-bound CRUD surface — the same verbs as a store, without `index
 These invariants hold across `src/browser/indexeddb` ↔ `indexeddb.md`:
 
 1. **DOC ↔ SOURCE bijection.** Every row in the `## Surface` tables is a real export of the wrapper, and every export appears as a Surface row — exhaustive, both directions (AGENTS §22).
-2. **Native, not a second query engine.** The wrapper exposes only what raw IndexedDB offers natively — object stores, secondary indexes, key ranges (`range`), cursors, and multi-store transactions. It has **no** `where` / `filter` / `order` / aggregate builder; that is the core database engine over `scan`. The reworked scsr package's standalone query / where-clause / aggregate classes are deliberately dropped here for exactly this reason.
-3. **`Row` values, `IDBValidKey` keys.** Reads return the core `Row` (narrowed with `isRecord`, never an unchecked cast); writes take a `Row`. Keys are the native `IDBValidKey`. Per-row typing belongs above this layer, in the core database's contracts.
-4. **In-line or out-of-line keys.** A store with a `path` keys rows by that field; a store with no `path` is out-of-line and takes an explicit key on `set` / `add` — which is exactly how the database driver writes (`set(row, key)`).
+2. **Native, not a query engine.** The wrapper exposes only what raw IndexedDB offers natively — object stores, secondary indexes, key ranges (`range`), cursors, and multi-store transactions. It has **no** `where` / `filter` / `order` / aggregate builder; that stays out of scope entirely, deliberately, so the wrapper never grows into a second query DSL.
+3. **`Row` values, `IDBValidKey` keys.** Reads return this package's own `Row` (narrowed with `isRecord`, never an unchecked cast); writes take a `Row`. Keys are the native `IDBValidKey`.
+4. **In-line or out-of-line keys.** A store with a `path` keys rows by that field; a store with no `path` is out-of-line and takes an explicit key on `set` / `add` (`set(row, key)`).
 5. **Batch by the array overload, array-first.** `get` / `resolve` / `has` / `remove` / `set` / `add` take one value for one result or an array for an array of results (AGENTS §9.2). The array overload is declared first because an array is itself both a record and a compound `IDBValidKey`; to act on a single compound key, pass `range.only([…])` to `records` / `count`.
 6. **Each standalone call is its own transaction; `read` / `write` are atomic.** A store method opens and commits its own implicit transaction; `db.read` / `db.write` run a scope across stores that commits on resolve and rolls back on a throw.
 7. **DOC ↔ SOURCE method bijection.** Every method in a `## Methods` table is a real call-signature member of that interface in source, and every public method of each behavioral interface is documented — exhaustive, both directions; and each implementing class exposes exactly its interface's public methods, no more (AGENTS §22).
 
 ## Patterns
 
-### Choosing the wrapper or the database
+### Feature-detecting before opening a database
 
 ```ts
-import { createDatabase, createMemoryDriver, stringShape } from '@src/core'
 import { createIndexedDBDatabase, isIndexedDBSupported } from '@src/browser'
 
-// Native power (indexes, ranges, cursors) — the wrapper, directly:
-const raw = createIndexedDBDatabase({ name: 'app', version: 1, stores: { users: { path: 'id' } } })
-
-// Portable, typed rows + queries + relations — the core database over a driver
-// (the IndexedDB driver is built on this same wrapper):
-const driver = isIndexedDBSupported()
-	? /* createIndexedDBDriver('app') */ createMemoryDriver()
-	: createMemoryDriver()
-const db = createDatabase({ driver, tables: { users: { id: stringShape() } } })
+if (isIndexedDBSupported()) {
+	const db = createIndexedDBDatabase({ name: 'app', version: 1, stores: { users: { path: 'id' } } })
+	await db.store('users').set({ id: 'u1', name: 'Ada' })
+}
 ```
 
 ### Index-backed reads with key ranges
@@ -222,13 +218,61 @@ while (cursor) {
 
 A `store` cursor runs in a `readwrite` transaction, so `update` / `delete` work; an `index` cursor is read-only and rejects them. Iterate promptly — an unrelated `await` between `continue` steps lets the transaction auto-commit and ends the loop.
 
-### Atomic multi-store transactions
+### Connection lifecycle: connect, close, drop
 
 ```ts
-await db.write(['users', 'posts'], async (tx) => {
-	await tx.store('users').set({ id: 'u1', name: 'Ada' })
-	await tx.store('posts').set({ id: 'p1', author: 'u1' })
-}) // commits together; throws roll the whole scope back
+await db.connect() // idempotent — a later store call would connect lazily anyway
+// ... use the database ...
+db.close() // release the connection, keeping the stored data
+await db.drop() // close AND delete the whole database
+```
+
+### Reading, testing, and clearing a store
+
+```ts
+const users = db.store('users')
+await users.resolve('u1') // like get, but throws NOT_FOUND on a miss
+await users.has(['u1', 'ghost']) // presence per key, batched (array-first)
+await users.remove(['u1', 'u2']) // delete by key, batched
+await users.clear() // empty the whole store
+```
+
+### Explicit transaction control and cursor movement
+
+```ts
+await db.write('users', async (tx) => {
+	const cursor = await tx.store('users').cursor()
+	if (cursor) {
+		await cursor.seek(cursor.key, cursor.primary) // re-arm at the same position
+		await cursor.advance(1) // skip forward one record
+		if (cursor) await cursor.update({ ...cursor.value, seen: true })
+	}
+	tx.commit() // flush early instead of waiting for the scope to resolve
+	// tx.abort() // or roll every write in this scope back
+})
+```
+
+### The request-boundary helpers directly
+
+```ts
+import {
+	hasKey,
+	promisifyRequest,
+	promisifyTransaction,
+	readRecord,
+	readRecords,
+	wrapError,
+} from '@src/browser'
+
+await db.read('users', async (tx) => {
+	const native = tx.store('users').store
+	await promisifyRequest(native.get('u1')) // the raw IDBRequest bridge
+	await readRecord(native, 'u1') // narrowed to Row (or undefined) with isRecord
+	await readRecords(native) // every record, narrowed the same way
+	await hasKey(native, 'u1') // a native count() > 0
+	await promisifyTransaction(native.transaction) // resolves once the tx commits
+})
+wrapError(null) // the same DOMException → IndexedDBError mapping every bridge uses
 ```
 
 ### Branching on a typed fault
@@ -250,27 +294,24 @@ Every native `DOMException` crosses the request boundary as an `IndexedDBError` 
 
 ### Practices
 
-- **Feature-detect with `isIndexedDBSupported`** and fall back to `createMemoryDriver` in non-browser contexts.
+- **Feature-detect with `isIndexedDBSupported`** before opening a database in an environment that may lack storage (a non-browser runtime, a privacy mode).
 - **Declare a `path`** for ordinary stores (in-line keys); omit it only when you mean to pass keys explicitly (out-of-line).
 - **Keep transaction scopes to awaited IndexedDB operations** — an unrelated `await` between steps lets the transaction auto-commit.
 - **Reach for `range`** instead of reading everything and filtering in JS; an index plus a key range is the wrapper's whole point.
 
 ## Tests
 
-- [`tests/guides/src/parity.test.ts`](../../tests/guides/src/parity.test.ts) — the `## Surface` ↔ `src/browser/indexeddb` bijection.
-- [`tests/src/browser/helpers.test.ts`](../../tests/src/browser/helpers.test.ts) — the browser test environment + the `isIndexedDBSupported` probe consumers run before entering this module.
-- [`tests/src/browser/indexeddb/IndexedDBDatabase.test.ts`](../../tests/src/browser/indexeddb/IndexedDBDatabase.test.ts) — the database handle in real Chromium: lazy connect and state, the `store` accessor, atomic `read` / `write` scopes, `close` / `drop`, the auto-managed schema path, and persistence across reopen.
-- [`tests/src/browser/indexeddb/IndexedDBStore.test.ts`](../../tests/src/browser/indexeddb/IndexedDBStore.test.ts) — the store reached through `db.store(name)`: metadata getters, the keyed CRUD surface with array-first batch overloads, key-range reads, `index` / `cursor` access, and the `NOT_FOUND` / `CONSTRAINT` faults.
-- [`tests/src/browser/indexeddb/IndexedDBIndex.test.ts`](../../tests/src/browser/indexeddb/IndexedDBIndex.test.ts) — the index reached through `store.index(name)`: metadata getters, the read surface (`get` / `resolve` / `records` / `keys` / `primary` / `has` / `count` / `cursor`), the unique-index lookup + constraint, and the `multiple` (multiEntry) array index.
-- [`tests/src/browser/indexeddb/IndexedDBCursor.test.ts`](../../tests/src/browser/indexeddb/IndexedDBCursor.test.ts) — the store/index cursor: the position snapshot (`key` / `primary` / `value` / `direction`), the moves (`continue` / `seek` / `advance`), and in-place `update` / `delete`.
-- [`tests/src/browser/indexeddb/IndexedDBTransaction.test.ts`](../../tests/src/browser/indexeddb/IndexedDBTransaction.test.ts) — the transaction from a `read` / `write` scope: metadata getters, scoped `store` access with its out-of-scope guard, and `abort` / `commit` with their finished-state faults.
-- [`tests/src/browser/indexeddb/IndexedDBTransactionStore.test.ts`](../../tests/src/browser/indexeddb/IndexedDBTransactionStore.test.ts) — the scoped store reached through `tx.store(name)`: the same keyed CRUD surface as a standalone store but bound to the owning transaction (so a sequence of reads and writes is atomic), without `index`.
-- [`tests/src/browser/indexeddb/helpers.test.ts`](../../tests/src/browser/indexeddb/helpers.test.ts) — the wrapper's exported helpers: the `range` key-range builders, the shared read primitives (`readRecord` / `readRecords` / `hasKey`) over a real store / index (including the non-record `isRecord` boundary), and the `promisifyRequest` / `promisifyTransaction` bridges (success + `IndexedDBError` rejection).
-- [`tests/src/browser/indexeddb/factories.test.ts`](../../tests/src/browser/indexeddb/factories.test.ts) — `createIndexedDBDatabase` returns a working `IndexedDBDatabaseInterface` that connects lazily, creates its declared stores and indexes, and round-trips real data.
+- [`tests/guides/src/parity.test.ts`](../../tests/guides/src/parity.test.ts) — the `## Surface` ↔ `src/browser` bijection.
+- [`tests/src/browser/helpers.test.ts`](../../tests/src/browser/helpers.test.ts) — the `isIndexedDBSupported` probe, the `range` key-range builders, the shared read primitives (`readRecord` / `readRecords` / `hasKey`) over a real store / index (including the non-record `isRecord` boundary), and the `promisifyRequest` / `promisifyTransaction` bridges (success + `IndexedDBError` rejection) and `wrapError`.
+- [`tests/src/browser/IndexedDBDatabase.test.ts`](../../tests/src/browser/IndexedDBDatabase.test.ts) — the database handle in real Chromium: lazy connect and state, the `store` accessor, atomic `read` / `write` scopes, `close` / `drop`, the auto-managed schema path, and persistence across reopen.
+- [`tests/src/browser/IndexedDBStore.test.ts`](../../tests/src/browser/IndexedDBStore.test.ts) — the store reached through `db.store(name)`: metadata getters, the keyed CRUD surface with array-first batch overloads, key-range reads, `index` / `cursor` access, and the `NOT_FOUND` / `CONSTRAINT` faults.
+- [`tests/src/browser/IndexedDBIndex.test.ts`](../../tests/src/browser/IndexedDBIndex.test.ts) — the index reached through `store.index(name)`: metadata getters, the read surface (`get` / `resolve` / `records` / `keys` / `primary` / `has` / `count` / `cursor`), the unique-index lookup + constraint, and the `multiple` (multiEntry) array index.
+- [`tests/src/browser/IndexedDBCursor.test.ts`](../../tests/src/browser/IndexedDBCursor.test.ts) — the store/index cursor: the position snapshot (`key` / `primary` / `value` / `direction`), the moves (`continue` / `seek` / `advance`), and in-place `update` / `delete`.
+- [`tests/src/browser/IndexedDBTransaction.test.ts`](../../tests/src/browser/IndexedDBTransaction.test.ts) — the transaction from a `read` / `write` scope: metadata getters, scoped `store` access with its out-of-scope guard, and `abort` / `commit` with their finished-state faults.
+- [`tests/src/browser/IndexedDBTransactionStore.test.ts`](../../tests/src/browser/IndexedDBTransactionStore.test.ts) — the scoped store reached through `tx.store(name)`: the same keyed CRUD surface as a standalone store but bound to the owning transaction (so a sequence of reads and writes is atomic), without `index`.
+- [`tests/src/browser/factories.test.ts`](../../tests/src/browser/factories.test.ts) — `createIndexedDBDatabase` returns a working `IndexedDBDatabaseInterface` that connects lazily, creates its declared stores and indexes, and round-trips real data.
 
 ## See also
 
-- [`databases.md`](databases.md) — the cross-environment database, tables, and query layer the IndexedDB driver plugs into.
-- [`relations.md`](relations.md) — eager loading, which works unchanged over that driver.
 - [`AGENTS.md`](../../AGENTS.md) — §22 documentation-as-contracts, §9.2 batch-by-overload.
 - [`README.md`](../README.md) — the guides index.

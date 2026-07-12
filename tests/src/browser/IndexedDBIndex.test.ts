@@ -6,7 +6,7 @@ import {
 	drainCursor,
 	errorCode,
 	seedUsers,
-} from '../../../setupBrowser.js'
+} from '../../setupBrowser.js'
 
 // `IndexedDBIndexInterface` in real Chromium, reached through
 // `store.index(name)` over a store declaring a secondary index: the metadata

@@ -1,14 +1,14 @@
 import type { IndexedDBDatabaseInterface } from '@src/browser'
 import { createIndexedDBDatabase, IndexedDBError } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { captureError } from '../../../setup.js'
+import { captureError } from '../../setup.js'
 import {
 	createCleanups,
 	createTestDatabase,
 	deleteDatabase,
 	errorCode,
 	uniqueName,
-} from '../../../setupBrowser.js'
+} from '../../setupBrowser.js'
 
 // The `IndexedDBDatabaseInterface` surface in real Chromium: lazy connect and
 // state (`name` / `version` / `stores` / `open` / `database`), the `store`
