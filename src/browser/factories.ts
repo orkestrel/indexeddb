@@ -16,7 +16,7 @@ import { IndexedDBDatabase } from './IndexedDBDatabase.js'
  *
  * @example
  * ```ts
- * import { createIndexedDBDatabase, range } from '@src/browser'
+ * import { createIndexedDBDatabase, range } from '@orkestrel/indexeddb'
  *
  * const db = createIndexedDBDatabase({
  * 	name: 'app',
