@@ -26,3 +26,14 @@ export function captureError(thunk: () => unknown): unknown {
 		return error
 	}
 }
+
+/**
+ * Wait `ms` milliseconds — the shared delay helper for tests that need a real
+ * macrotask to pass (AGENTS §16.1), e.g. to let a transaction auto-commit
+ * before asserting on the fault an operation raises afterward.
+ *
+ * @param ms - The delay, in milliseconds (defaults to `0`, one macrotask)
+ */
+export function waitForDelay(ms = 0): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms))
+}

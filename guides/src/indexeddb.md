@@ -47,18 +47,19 @@ await users.index('byAge').records(range.from(18)) // adults, index-backed (O(lo
 
 ### Helpers and errors
 
-| API                    | Kind     | Summary                                                                                   |
-| ---------------------- | -------- | ----------------------------------------------------------------------------------------- |
-| `isIndexedDBSupported` | function | Whether IndexedDB is available in this environment (`globalThis.indexedDB`).              |
-| `promisifyRequest`     | function | Resolve an `IDBRequest` to its result, rejecting with an `IndexedDBError`.                |
-| `promisifyTransaction` | function | Resolve once an `IDBTransaction` commits, rejecting if it errors or aborts.               |
-| `readRecord`           | function | Read one record from a store or index by key, narrowed to a `Row` with `isRecord`.        |
-| `readRecords`          | function | Read many records from a store or index over an optional key range, narrowed to `Row`s.   |
-| `hasKey`               | function | Whether a key is present in a store or index (a native `count` > 0).                      |
-| `range`                | const    | Key-range builders (`only` / `above` / `from` / `below` / `to` / `between` / `prefix`).   |
-| `wrapError`            | function | Map a native IndexedDB `DOMException` to a typed `IndexedDBError` (the request boundary). |
-| `IndexedDBError`       | class    | A wrapper error carrying a machine-readable `code` mapped from the native fault.          |
-| `isIndexedDBError`     | function | Whether a value is an `IndexedDBError`.                                                   |
+| API                    | Kind     | Summary                                                                                             |
+| ---------------------- | -------- | --------------------------------------------------------------------------------------------------- |
+| `isIndexedDBSupported` | function | Whether IndexedDB is available in this environment (`globalThis.indexedDB`).                        |
+| `promisifyRequest`     | function | Resolve an `IDBRequest` to its result, rejecting with an `IndexedDBError`.                          |
+| `promisifyTransaction` | function | Resolve once an `IDBTransaction` commits, rejecting if it errors or aborts.                         |
+| `readRecord`           | function | Read one record from a store or index by key, narrowed to a `Row` with `isRecord`.                  |
+| `readRecords`          | function | Read many records from a store or index over an optional key range, narrowed to `Row`s.             |
+| `hasKey`               | function | Whether a key is present in a store or index (a native `count` > 0).                                |
+| `guardSync`            | function | Run a synchronous native IndexedDB call, wrapping a thrown `DOMException` into an `IndexedDBError`. |
+| `range`                | const    | Key-range builders (`only` / `above` / `from` / `below` / `to` / `between` / `prefix`).             |
+| `wrapError`            | function | Map a native IndexedDB `DOMException` to a typed `IndexedDBError` (the request boundary).           |
+| `IndexedDBError`       | class    | A wrapper error carrying a machine-readable `code` mapped from the native fault.                    |
+| `isIndexedDBError`     | function | Whether a value is an `IndexedDBError`.                                                             |
 
 ### Constants
 
@@ -266,6 +267,7 @@ await db.write('users', async (tx) => {
 
 ```ts
 import {
+	guardSync,
 	hasKey,
 	promisifyRequest,
 	promisifyTransaction,
@@ -276,7 +278,7 @@ import {
 
 await db.read('users', async (tx) => {
 	const native = tx.store('users').store
-	await promisifyRequest(native.get('u1')) // the raw IDBRequest bridge
+	await promisifyRequest(guardSync(() => native.get('u1'))) // sync throw → IndexedDBError too
 	await readRecord(native, 'u1') // narrowed to Row (or undefined) with isRecord
 	await readRecords(native) // every record, narrowed the same way
 	await hasKey(native, 'u1') // a native count() > 0
@@ -318,7 +320,9 @@ try {
 
 ### Versioned upgrades: dropping a store, indexing an existing store, migrating data
 
-> **The auto-commit rule.** A transaction — including the versionchange transaction `upgrade` runs in — commits the moment control returns to the event loop with no pending IndexedDB request. Every step inside `upgrade` (and inside any `read` / `write` scope) must be an awaited IndexedDB request; a non-IDB `await` (a `fetch`, a `setTimeout`, an unrelated Promise) lets the transaction auto-commit out from under you, so any later `IndexedDBTransactionStoreInterface` call on it fails `INACTIVE`. This is also why there is no returnable, held-open transaction handle on this wrapper — IndexedDB itself auto-commits any transaction that isn't driven promptly, so a handle you could stash and use later would be broken by design; `read` / `write` and `upgrade` exist specifically to keep the whole scope on the stack instead.
+> **The auto-commit rule.** A transaction — including the versionchange transaction `upgrade` runs in — commits the moment control returns to the event loop with no pending IndexedDB request. Every step inside `upgrade` (and inside any `read` / `write` scope) must be an awaited IndexedDB request; a non-IDB `await` (a `fetch`, a `setTimeout`, an unrelated Promise) lets the transaction auto-commit out from under you, so any later `IndexedDBTransactionStoreInterface` call on it fails `INACTIVE` — every request-issuing call wraps its synchronous native invocation so this (and a closed-connection `INVALID`) surfaces as a typed `IndexedDBError`, the same as an asynchronous fault. This is also why there is no returnable, held-open transaction handle on this wrapper — IndexedDB itself auto-commits any transaction that isn't driven promptly, so a handle you could stash and use later would be broken by design; `read` / `write` and `upgrade` exist specifically to keep the whole scope on the stack instead.
+>
+> `upgrade` may return `void` or a `Promise<void>` — an async `upgrade` can `await` the IDB requests it issues through `context.store(...)`, subject to the same rule. A rejection aborts the versionchange transaction and rejects the pending `connect()` with a typed `IndexedDBError` (code `UPGRADE`) rather than an unhandled rejection.
 
 ```ts
 import { createIndexedDBDatabase } from '@src/browser'
@@ -352,20 +356,20 @@ await db.connect()
 - **Declare a `path`** for ordinary stores (in-line keys); omit it only when you mean to pass keys explicitly (out-of-line).
 - **Keep transaction scopes to awaited IndexedDB operations** — an unrelated `await` between steps lets the transaction auto-commit (see the auto-commit rule above).
 - **Reach for `range`** instead of reading everything and filtering in JS; an index plus a key range is the wrapper's whole point.
-- **A live connection yields to another tab's upgrade.** The database wires the native `onversionchange` event to close itself, so a second tab (or a second `IndexedDBDatabaseInterface` in the same page) opening at a higher version is never blocked indefinitely; a later call on the yielded handle lazily reconnects. Without this, two open tabs over the same database can hang forever.
+- **A live connection yields to another tab's upgrade.** The database wires the native `onversionchange` event to close itself, so a second tab (or a second `IndexedDBDatabaseInterface` in the same page) opening at a higher version is never blocked indefinitely. Because that `close()` is self-initiated, the native `close` event does NOT fire for it — so the handler also clears its own `open` state, the same latches the native `close` event clears for an externally-closed connection — and a later call on the yielded handle lazily reconnects at the new version. Without this, two open tabs over the same database can hang forever.
 - **Storage persistence is app policy, not this wrapper's job.** Whether the browser is allowed to evict a database under storage pressure (`navigator.storage.persist()`) is a call the consuming application makes — this wrapper does not surface a `durability` option or any persistence API; it stays strictly on the raw IndexedDB CRUD/schema surface.
 - **Safari quirks — untested here, Chromium-only CI.** This package's test suite runs against real Chromium only. Safari has historically shipped `getAll` bugs and first-transaction-after-upgrade quirks on some versions; if you must support Safari, verify your exact schema and upgrade path there directly rather than assuming Chromium parity.
 
 ## Tests
 
 - [`tests/guides/src/parity.test.ts`](../../tests/guides/src/parity.test.ts) — the `## Surface` ↔ `src/browser` bijection.
-- [`tests/src/browser/helpers.test.ts`](../../tests/src/browser/helpers.test.ts) — the `isIndexedDBSupported` probe, the `range` key-range builders, the shared read primitives (`readRecord` / `readRecords` / `hasKey`) over a real store / index (including the non-record `isRecord` boundary), the `promisifyRequest` / `promisifyTransaction` bridges (success + `IndexedDBError` rejection), `wrapError` (including `INACTIVE` / `INVALID`), and `isIndexedDBError`.
-- [`tests/src/browser/IndexedDBDatabase.test.ts`](../../tests/src/browser/IndexedDBDatabase.test.ts) — the database handle in real Chromium: lazy connect and state, the `store` accessor, atomic `read` / `write` scopes, `close` / `drop`, the auto-managed schema path, persistence across reopen, the `upgrade` hook (dropping a store, indexing an existing store, data migration, `context.create`, and `old` / `version` / `stores`), and a live connection yielding to a second connection's `versionchange`.
+- [`tests/src/browser/helpers.test.ts`](../../tests/src/browser/helpers.test.ts) — the `isIndexedDBSupported` probe, the `range` key-range builders, the shared read primitives (`readRecord` / `readRecords` / `hasKey`) over a real store / index (including the non-record `isRecord` boundary), the `promisifyRequest` / `promisifyTransaction` bridges (success + `IndexedDBError` rejection), `guardSync` wrapping a thrown `DOMException`, `wrapError` (including `INACTIVE` / `INVALID`), and `isIndexedDBError`.
+- [`tests/src/browser/IndexedDBDatabase.test.ts`](../../tests/src/browser/IndexedDBDatabase.test.ts) — the database handle in real Chromium: lazy connect and state, the `store` accessor, atomic `read` / `write` scopes, `close` / `drop`, the auto-managed schema path, persistence across reopen, the `upgrade` hook (dropping a store, indexing an existing store, data migration, `context.create`, `old` / `version` / `stores`, and an async `upgrade` rejection cleanly failing `connect()` with `UPGRADE`), a live connection yielding to a second connection's `versionchange`, and that yielded handle lazily reconnecting at the new version on its next operation.
 - [`tests/src/browser/IndexedDBStore.test.ts`](../../tests/src/browser/IndexedDBStore.test.ts) — the store reached through `db.store(name)`: metadata getters, the keyed CRUD surface with array-first batch overloads, key-range reads, `index` / `cursor` access, and the `NOT_FOUND` / `CONSTRAINT` faults.
 - [`tests/src/browser/IndexedDBIndex.test.ts`](../../tests/src/browser/IndexedDBIndex.test.ts) — the index reached through `store.index(name)`: metadata getters, the read surface (`get` / `resolve` / `records` / `keys` / `primary` / `has` / `count` / `cursor`), the unique-index lookup + constraint, and the `multiple` (multiEntry) array index.
 - [`tests/src/browser/IndexedDBCursor.test.ts`](../../tests/src/browser/IndexedDBCursor.test.ts) — the store/index cursor: the position snapshot (`key` / `primary` / `value` / `direction`), the moves (`continue` / `seek` / `advance`), and in-place `update` / `delete`.
 - [`tests/src/browser/IndexedDBTransaction.test.ts`](../../tests/src/browser/IndexedDBTransaction.test.ts) — the transaction from a `read` / `write` scope: metadata getters, scoped `store` access with its out-of-scope guard, and `abort` / `commit` with their finished-state faults.
-- [`tests/src/browser/IndexedDBTransactionStore.test.ts`](../../tests/src/browser/IndexedDBTransactionStore.test.ts) — the scoped store reached through `tx.store(name)`: the same keyed CRUD surface as a standalone store but bound to the owning transaction (so a sequence of reads and writes is atomic), without `index`.
+- [`tests/src/browser/IndexedDBTransactionStore.test.ts`](../../tests/src/browser/IndexedDBTransactionStore.test.ts) — the scoped store reached through `tx.store(name)`: the same keyed CRUD surface as a standalone store but bound to the owning transaction (so a sequence of reads and writes is atomic), without `index`, and a real `INACTIVE` fault once the owning transaction auto-commits out from under a captured store.
 - [`tests/src/browser/factories.test.ts`](../../tests/src/browser/factories.test.ts) — `createIndexedDBDatabase` returns a working `IndexedDBDatabaseInterface` that connects lazily, creates its declared stores and indexes, and round-trips real data.
 
 ## See also

@@ -59,9 +59,7 @@
 		"prepublishOnly": "npm run format:check && npm run lint:check && npm run check && npm run check:src && npm run build && npm test"
 	},
 	"dependencies": {
-		"@orkestrel/abort": "^0.0.1",
-		"@orkestrel/contract": "^0.0.1",
-		"@orkestrel/emitter": "^0.0.1"
+		"@orkestrel/contract": "^0.0.1"
 	},
 	"devDependencies": {
 		"@orkestrel/guide": "^0.0.1",

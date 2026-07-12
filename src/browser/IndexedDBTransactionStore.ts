@@ -6,7 +6,7 @@ import type {
 	Row,
 } from './types.js'
 import { IndexedDBError } from './errors.js'
-import { hasKey, promisifyRequest, readRecord, readRecords } from './helpers.js'
+import { guardSync, hasKey, promisifyRequest, readRecord, readRecords } from './helpers.js'
 import { IndexedDBCursor } from './IndexedDBCursor.js'
 
 /**
@@ -61,7 +61,7 @@ export class IndexedDBTransactionStore implements IndexedDBTransactionStoreInter
 		query?: IDBKeyRange | IDBValidKey | null,
 		count?: number,
 	): Promise<readonly IDBValidKey[]> {
-		return promisifyRequest(this.#store.getAllKeys(query ?? undefined, count))
+		return promisifyRequest(guardSync(() => this.#store.getAllKeys(query ?? undefined, count)))
 	}
 
 	has(keys: readonly IDBValidKey[]): Promise<readonly boolean[]>
@@ -76,7 +76,7 @@ export class IndexedDBTransactionStore implements IndexedDBTransactionStoreInter
 	}
 
 	async count(query?: IDBKeyRange | IDBValidKey | null): Promise<number> {
-		return promisifyRequest(this.#store.count(query ?? undefined))
+		return promisifyRequest(guardSync(() => this.#store.count(query ?? undefined)))
 	}
 
 	set(values: readonly Row[]): Promise<readonly IDBValidKey[]>
@@ -86,10 +86,14 @@ export class IndexedDBTransactionStore implements IndexedDBTransactionStoreInter
 		key?: IDBValidKey,
 	): Promise<IDBValidKey | readonly IDBValidKey[]> {
 		if (isArray<Row>(valueOrValues)) {
-			return Promise.all(valueOrValues.map((value) => promisifyRequest(this.#store.put(value))))
+			return Promise.all(
+				valueOrValues.map((value) => promisifyRequest(guardSync(() => this.#store.put(value)))),
+			)
 		}
 		return promisifyRequest(
-			key === undefined ? this.#store.put(valueOrValues) : this.#store.put(valueOrValues, key),
+			guardSync(() =>
+				key === undefined ? this.#store.put(valueOrValues) : this.#store.put(valueOrValues, key),
+			),
 		)
 	}
 
@@ -100,10 +104,14 @@ export class IndexedDBTransactionStore implements IndexedDBTransactionStoreInter
 		key?: IDBValidKey,
 	): Promise<IDBValidKey | readonly IDBValidKey[]> {
 		if (isArray<Row>(valueOrValues)) {
-			return Promise.all(valueOrValues.map((value) => promisifyRequest(this.#store.add(value))))
+			return Promise.all(
+				valueOrValues.map((value) => promisifyRequest(guardSync(() => this.#store.add(value)))),
+			)
 		}
 		return promisifyRequest(
-			key === undefined ? this.#store.add(valueOrValues) : this.#store.add(valueOrValues, key),
+			guardSync(() =>
+				key === undefined ? this.#store.add(valueOrValues) : this.#store.add(valueOrValues, key),
+			),
 		)
 	}
 
@@ -111,18 +119,22 @@ export class IndexedDBTransactionStore implements IndexedDBTransactionStoreInter
 	remove(key: IDBValidKey): Promise<void>
 	async remove(keyOrKeys: IDBValidKey | readonly IDBValidKey[]): Promise<void> {
 		if (isArray<IDBValidKey>(keyOrKeys)) {
-			await Promise.all(keyOrKeys.map((key) => promisifyRequest(this.#store.delete(key))))
+			await Promise.all(
+				keyOrKeys.map((key) => promisifyRequest(guardSync(() => this.#store.delete(key)))),
+			)
 			return
 		}
-		await promisifyRequest(this.#store.delete(keyOrKeys))
+		await promisifyRequest(guardSync(() => this.#store.delete(keyOrKeys)))
 	}
 
 	async clear(): Promise<void> {
-		await promisifyRequest(this.#store.clear())
+		await promisifyRequest(guardSync(() => this.#store.clear()))
 	}
 
 	async cursor(options?: CursorOptions): Promise<IndexedDBCursorInterface | null> {
-		const request = this.#store.openCursor(options?.query ?? null, options?.direction ?? 'next')
+		const request = guardSync(() =>
+			this.#store.openCursor(options?.query ?? null, options?.direction ?? 'next'),
+		)
 		const cursor = await promisifyRequest(request)
 		return cursor ? new IndexedDBCursor(cursor, request) : null
 	}

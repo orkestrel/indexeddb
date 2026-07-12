@@ -31,9 +31,13 @@ export class IndexedDBTransaction<
 			this.#active = false
 			this.#finished = true
 		}
-		transaction.oncomplete = settle
-		transaction.onabort = settle
-		transaction.onerror = settle
+		// `addEventListener` rather than the `on*` slots: `#run` also awaits this
+		// same native transaction through `promisifyTransaction`, which listens the
+		// same way — assigning `on*` here would clobber whichever handler is wired
+		// second.
+		transaction.addEventListener('complete', settle)
+		transaction.addEventListener('abort', settle)
+		transaction.addEventListener('error', settle)
 	}
 
 	get transaction(): IDBTransaction {

@@ -10,6 +10,7 @@ import type {
 } from './types.js'
 import { IndexedDBError } from './errors.js'
 import {
+	guardSync,
 	hasKey,
 	promisifyRequest,
 	promisifyTransaction,
@@ -92,7 +93,7 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 		count?: number,
 	): Promise<readonly IDBValidKey[]> {
 		const store = await this.#store('readonly')
-		return promisifyRequest(store.getAllKeys(query ?? undefined, count))
+		return promisifyRequest(guardSync(() => store.getAllKeys(query ?? undefined, count)))
 	}
 
 	has(keys: readonly IDBValidKey[]): Promise<readonly boolean[]>
@@ -109,7 +110,7 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 
 	async count(query?: IDBKeyRange | IDBValidKey | null): Promise<number> {
 		const store = await this.#store('readonly')
-		return promisifyRequest(store.count(query ?? undefined))
+		return promisifyRequest(guardSync(() => store.count(query ?? undefined)))
 	}
 
 	set(values: readonly Row[]): Promise<readonly IDBValidKey[]>
@@ -121,13 +122,15 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 		const store = await this.#store('readwrite')
 		if (isArray<Row>(valueOrValues)) {
 			const keys = await Promise.all(
-				valueOrValues.map((value) => promisifyRequest(store.put(value))),
+				valueOrValues.map((value) => promisifyRequest(guardSync(() => store.put(value)))),
 			)
 			await promisifyTransaction(store.transaction)
 			return keys
 		}
 		const written = await promisifyRequest(
-			key === undefined ? store.put(valueOrValues) : store.put(valueOrValues, key),
+			guardSync(() =>
+				key === undefined ? store.put(valueOrValues) : store.put(valueOrValues, key),
+			),
 		)
 		await promisifyTransaction(store.transaction)
 		return written
@@ -142,13 +145,15 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 		const store = await this.#store('readwrite')
 		if (isArray<Row>(valueOrValues)) {
 			const keys = await Promise.all(
-				valueOrValues.map((value) => promisifyRequest(store.add(value))),
+				valueOrValues.map((value) => promisifyRequest(guardSync(() => store.add(value)))),
 			)
 			await promisifyTransaction(store.transaction)
 			return keys
 		}
 		const written = await promisifyRequest(
-			key === undefined ? store.add(valueOrValues) : store.add(valueOrValues, key),
+			guardSync(() =>
+				key === undefined ? store.add(valueOrValues) : store.add(valueOrValues, key),
+			),
 		)
 		await promisifyTransaction(store.transaction)
 		return written
@@ -159,16 +164,18 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 	async remove(keyOrKeys: IDBValidKey | readonly IDBValidKey[]): Promise<void> {
 		const store = await this.#store('readwrite')
 		if (isArray<IDBValidKey>(keyOrKeys)) {
-			await Promise.all(keyOrKeys.map((key) => promisifyRequest(store.delete(key))))
+			await Promise.all(
+				keyOrKeys.map((key) => promisifyRequest(guardSync(() => store.delete(key)))),
+			)
 		} else {
-			await promisifyRequest(store.delete(keyOrKeys))
+			await promisifyRequest(guardSync(() => store.delete(keyOrKeys)))
 		}
 		await promisifyTransaction(store.transaction)
 	}
 
 	async clear(): Promise<void> {
 		const store = await this.#store('readwrite')
-		await promisifyRequest(store.clear())
+		await promisifyRequest(guardSync(() => store.clear()))
 		await promisifyTransaction(store.transaction)
 	}
 
@@ -185,7 +192,9 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 
 	async cursor(options?: CursorOptions): Promise<IndexedDBCursorInterface | null> {
 		const store = await this.#store('readwrite')
-		const request = store.openCursor(options?.query ?? null, options?.direction ?? 'next')
+		const request = guardSync(() =>
+			store.openCursor(options?.query ?? null, options?.direction ?? 'next'),
+		)
 		const cursor = await promisifyRequest(request)
 		return cursor ? new IndexedDBCursor(cursor, request) : null
 	}
@@ -193,7 +202,7 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 	// Open this object store in a fresh transaction of the given mode.
 	async #store(mode: IDBTransactionMode): Promise<IDBObjectStore> {
 		const database = await this.#connect()
-		return database.transaction([this.#name], mode).objectStore(this.#name)
+		return guardSync(() => database.transaction([this.#name], mode).objectStore(this.#name))
 	}
 
 	async #resolve(store: IDBObjectStore, key: IDBValidKey): Promise<Row> {

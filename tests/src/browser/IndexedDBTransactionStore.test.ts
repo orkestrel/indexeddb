@@ -1,5 +1,7 @@
+import type { IndexedDBTransactionStoreInterface } from '@src/browser'
 import { IndexedDBError, range } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
+import { waitForDelay } from '../../setup.js'
 import { createCleanups, createTestDatabase, drainCursor, errorCode } from '../../setupBrowser.js'
 
 // `IndexedDBTransactionStoreInterface` in real Chromium, reached through
@@ -151,5 +153,29 @@ describe('IndexedDBTransactionStore — out-of-line keys and cursor', () => {
 			.catch(() => {})
 		expect(await db.store('users').get('u1')).toEqual({ id: 'u1', n: 1 })
 		expect(await db.store('users').get('u2')).toBeUndefined()
+	})
+})
+
+describe('IndexedDBTransactionStore — synchronous native faults', () => {
+	it('throws a real INACTIVE once the owning transaction auto-commits out from under it', async () => {
+		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
+		cleanups.push(cleanup)
+		let captured: IndexedDBTransactionStoreInterface | undefined
+		await db.write('users', (tx) => {
+			// Capture the transaction-bound store but issue no request on it — the
+			// scope resolves synchronously, so the owning transaction auto-commits
+			// once control returns to the event loop.
+			captured = tx.store('users')
+		})
+		// A macrotask past the scope's resolution: the transaction has committed and
+		// gone inactive. `get` issues a synchronous native `IDBObjectStore.get` on a
+		// store whose transaction is no longer active — the wrapper's `guardSync`
+		// catches that synchronous `TransactionInactiveError` and rejects with a
+		// typed `IndexedDBError`, never an unhandled throw.
+		await waitForDelay(10)
+		const caught =
+			captured === undefined ? undefined : await captured.get('u1').catch((error: unknown) => error)
+		expect(caught).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(caught)).toBe('INACTIVE')
 	})
 })

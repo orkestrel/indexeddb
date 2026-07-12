@@ -8,7 +8,7 @@ import type {
 	Row,
 } from './types.js'
 import { IndexedDBError } from './errors.js'
-import { hasKey, promisifyRequest, readRecord, readRecords } from './helpers.js'
+import { guardSync, hasKey, promisifyRequest, readRecord, readRecords } from './helpers.js'
 import { IndexedDBCursor } from './IndexedDBCursor.js'
 
 /**
@@ -88,12 +88,12 @@ export class IndexedDBIndex implements IndexedDBIndexInterface {
 		count?: number,
 	): Promise<readonly IDBValidKey[]> {
 		const index = await this.#index()
-		return promisifyRequest(index.getAllKeys(query ?? undefined, count))
+		return promisifyRequest(guardSync(() => index.getAllKeys(query ?? undefined, count)))
 	}
 
 	async primary(key: IDBValidKey): Promise<IDBValidKey | undefined> {
 		const index = await this.#index()
-		return promisifyRequest(index.getKey(key))
+		return promisifyRequest(guardSync(() => index.getKey(key)))
 	}
 
 	has(keys: readonly IDBValidKey[]): Promise<readonly boolean[]>
@@ -110,12 +110,14 @@ export class IndexedDBIndex implements IndexedDBIndexInterface {
 
 	async count(query?: IDBKeyRange | IDBValidKey | null): Promise<number> {
 		const index = await this.#index()
-		return promisifyRequest(index.count(query ?? undefined))
+		return promisifyRequest(guardSync(() => index.count(query ?? undefined)))
 	}
 
 	async cursor(options?: CursorOptions): Promise<IndexedDBCursorInterface | null> {
 		const index = await this.#index()
-		const request = index.openCursor(options?.query ?? null, options?.direction ?? 'next')
+		const request = guardSync(() =>
+			index.openCursor(options?.query ?? null, options?.direction ?? 'next'),
+		)
 		const cursor = await promisifyRequest(request)
 		return cursor ? new IndexedDBCursor(cursor, request) : null
 	}
@@ -123,10 +125,9 @@ export class IndexedDBIndex implements IndexedDBIndexInterface {
 	// Open this index in a fresh readonly transaction.
 	async #index(): Promise<IDBIndex> {
 		const database = await this.#connect()
-		return database
-			.transaction([this.#store], 'readonly')
-			.objectStore(this.#store)
-			.index(this.#name)
+		return guardSync(() =>
+			database.transaction([this.#store], 'readonly').objectStore(this.#store).index(this.#name),
+		)
 	}
 
 	async #resolve(index: IDBIndex, key: IDBValidKey): Promise<Row> {

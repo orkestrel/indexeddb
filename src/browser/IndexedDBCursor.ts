@@ -1,6 +1,6 @@
 import { isRecord } from '@orkestrel/contract'
 import type { IndexedDBCursorInterface, Row } from './types.js'
-import { promisifyRequest } from './helpers.js'
+import { guardSync, promisifyRequest } from './helpers.js'
 
 /**
  * A promisified value cursor over an object store or index.
@@ -56,29 +56,31 @@ export class IndexedDBCursor implements IndexedDBCursorInterface {
 	}
 
 	async continue(key?: IDBValidKey): Promise<IndexedDBCursorInterface | null> {
-		if (key === undefined) this.#cursor.continue()
-		else this.#cursor.continue(key)
+		guardSync(() => {
+			if (key === undefined) this.#cursor.continue()
+			else this.#cursor.continue(key)
+		})
 		return this.#advance()
 	}
 
 	async seek(key: IDBValidKey, primary: IDBValidKey): Promise<IndexedDBCursorInterface | null> {
-		this.#cursor.continuePrimaryKey(key, primary)
+		guardSync(() => this.#cursor.continuePrimaryKey(key, primary))
 		return this.#advance()
 	}
 
 	async advance(count: number): Promise<IndexedDBCursorInterface | null> {
-		this.#cursor.advance(count)
+		guardSync(() => this.#cursor.advance(count))
 		return this.#advance()
 	}
 
 	async update(value: Row): Promise<IDBValidKey> {
-		const key = await promisifyRequest(this.#cursor.update(value))
+		const key = await promisifyRequest(guardSync(() => this.#cursor.update(value)))
 		this.#value = value
 		return key
 	}
 
 	async delete(): Promise<void> {
-		await promisifyRequest(this.#cursor.delete())
+		await promisifyRequest(guardSync(() => this.#cursor.delete()))
 	}
 
 	// Await the shared request after a move, wrapping the next position (or null).

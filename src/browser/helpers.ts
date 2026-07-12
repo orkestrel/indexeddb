@@ -56,10 +56,39 @@ export function promisifyRequest<T>(request: IDBRequest<T>): Promise<T> {
  */
 export function promisifyTransaction(transaction: IDBTransaction): Promise<void> {
 	return new Promise((resolve, reject) => {
-		transaction.oncomplete = () => resolve()
-		transaction.onerror = () => reject(wrapError(transaction.error))
-		transaction.onabort = () => reject(wrapError(transaction.error))
+		// `addEventListener` rather than the `on*` slots: a caller may already have
+		// its own `on*` handlers on this transaction (`IndexedDBTransaction`'s
+		// constructor tracks `active` / `finished` the same way) — assigning would
+		// clobber whichever handler ran second to set up.
+		transaction.addEventListener('complete', () => resolve())
+		transaction.addEventListener('error', () => reject(wrapError(transaction.error)))
+		transaction.addEventListener('abort', () => reject(wrapError(transaction.error)))
 	})
+}
+
+/**
+ * Run a synchronous native IndexedDB call, wrapping a thrown `DOMException`
+ * into a typed {@link IndexedDBError}.
+ *
+ * @remarks
+ * Native IndexedDB throws SYNCHRONOUSLY (not through a request's `onerror`)
+ * from calls like `database.transaction(...)` or an inactive/closed store's
+ * `get` / `put` / `openCursor` — `TransactionInactiveError` /
+ * `InvalidStateError` never reach {@link promisifyRequest}'s `onerror`
+ * bridge. Every request-issuing call site wraps its native invocation in this
+ * so those faults surface as the same typed `IndexedDBError` as an
+ * asynchronous one.
+ *
+ * @param action - The synchronous native call to run
+ * @returns Its return value
+ */
+export function guardSync<T>(action: () => T): T {
+	try {
+		return action()
+	} catch (error) {
+		if (error instanceof DOMException) throw wrapError(error)
+		throw error
+	}
 }
 
 /**
@@ -80,7 +109,7 @@ export async function readRecord(
 	source: IDBObjectStore | IDBIndex,
 	key: IDBValidKey,
 ): Promise<Row | undefined> {
-	const value = await promisifyRequest<unknown>(source.get(key))
+	const value = await promisifyRequest<unknown>(guardSync(() => source.get(key)))
 	return isRecord(value) ? value : undefined
 }
 
@@ -103,7 +132,9 @@ export async function readRecords(
 	query?: IDBKeyRange | IDBValidKey | null,
 	count?: number,
 ): Promise<readonly Row[]> {
-	const all = await promisifyRequest<unknown[]>(source.getAll(query ?? undefined, count))
+	const all = await promisifyRequest<unknown[]>(
+		guardSync(() => source.getAll(query ?? undefined, count)),
+	)
 	return all.filter(isRecord)
 }
 
@@ -123,7 +154,7 @@ export async function hasKey(
 	source: IDBObjectStore | IDBIndex,
 	key: IDBValidKey,
 ): Promise<boolean> {
-	return (await promisifyRequest(source.count(key))) > 0
+	return (await promisifyRequest(guardSync(() => source.count(key)))) > 0
 }
 
 /**

@@ -9,7 +9,7 @@ import type {
 	StoresShape,
 } from './types.js'
 import { IndexedDBError } from './errors.js'
-import { promisifyTransaction } from './helpers.js'
+import { guardSync, promisifyTransaction } from './helpers.js'
 import { IndexedDBStore } from './IndexedDBStore.js'
 import { IndexedDBTransaction } from './IndexedDBTransaction.js'
 import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
@@ -31,7 +31,7 @@ export class IndexedDBDatabase<
 	readonly #name: string
 	readonly #version: number | undefined
 	readonly #stores: Stores
-	readonly #upgrade: ((context: IndexedDBUpgradeContext) => void) | undefined
+	readonly #upgrade: ((context: IndexedDBUpgradeContext) => void | Promise<void>) | undefined
 	#database: IDBDatabase | undefined
 	#opening: Promise<IDBDatabase> | undefined
 	#closed = false
@@ -155,7 +155,7 @@ export class IndexedDBDatabase<
 	): Promise<void> {
 		const database = await this.connect()
 		const names = isArray<string>(stores) ? [...stores] : [stores]
-		const native = database.transaction(names, mode)
+		const native = guardSync(() => database.transaction(names, mode))
 		const tx = new IndexedDBTransaction<Stores>(native)
 		try {
 			await scope(tx)
@@ -191,10 +191,15 @@ export class IndexedDBDatabase<
 		// Yield to another context's version-change upgrade instead of blocking it
 		// indefinitely — without this, two tabs over the same database hang: the
 		// second tab's `open` sits in `onblocked` forever because this connection
-		// never closes on its own. Closing here lets that upgrade proceed; a later
-		// operation on this handle lazily reconnects.
+		// never closes on its own. `close()` here is self-initiated, so `onclose`
+		// does NOT fire (the browser only fires it when the connection closes for a
+		// reason other than `close()` itself) — clear the same latches `onclose`
+		// clears so a later operation on this handle lazily reconnects instead of
+		// forever holding a closed `#database`.
 		database.onversionchange = () => {
 			database.close()
+			this.#database = undefined
+			this.#opening = undefined
 		}
 		this.#database = database
 		return database
@@ -203,6 +208,11 @@ export class IndexedDBDatabase<
 	// One `indexedDB.open`, creating any missing declared store in `onupgradeneeded`.
 	#request(version: number | undefined): Promise<IDBDatabase> {
 		return new Promise((resolve, reject) => {
+			// Set when `options.upgrade` returns a Promise that rejects — captured
+			// here rather than left as a dangling, unhandled rejection, and routed
+			// into `onerror` below: the failed upgrade aborts its versionchange
+			// transaction, which fails this very open request.
+			let upgradeError: unknown
 			const request =
 				version === undefined
 					? globalThis.indexedDB.open(this.#name)
@@ -217,13 +227,28 @@ export class IndexedDBDatabase<
 				if (this.#upgrade !== undefined) {
 					const transaction = request.transaction
 					if (transaction !== null) {
-						this.#upgrade(this.#context(database, transaction, event))
+						const result = this.#upgrade(this.#context(database, transaction, event))
+						if (result !== undefined) {
+							result.catch((error: unknown) => {
+								upgradeError = error
+								try {
+									transaction.abort()
+								} catch {
+									// Already settled — the versionchange transaction committed or
+									// aborted before the rejection arrived; nothing to roll back.
+								}
+							})
+						}
 					}
 				}
 			}
 			request.onsuccess = () => resolve(request.result)
 			request.onerror = () =>
-				reject(new IndexedDBError('OPEN', `Failed to open database '${this.#name}'`, request.error))
+				reject(
+					upgradeError !== undefined
+						? new IndexedDBError('UPGRADE', `Upgrade of '${this.#name}' failed`, upgradeError)
+						: new IndexedDBError('OPEN', `Failed to open database '${this.#name}'`, request.error),
+				)
 			request.onblocked = () =>
 				reject(
 					new IndexedDBError('BLOCKED', `Open of '${this.#name}' is blocked by another connection`),

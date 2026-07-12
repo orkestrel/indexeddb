@@ -35,8 +35,12 @@ export type Row = Record<string, unknown>
  * another live connection), `DATA` (an invalid key or value), `OPEN` /
  * `UPGRADE` (a failed open or schema upgrade), `INACTIVE` (the transaction went
  * inactive — IndexedDB's auto-commit fault, raised when an operation runs after
- * a non-IDB `await` deactivated its transaction), `INVALID` (an operation on a
- * closed or otherwise invalid connection), and `UNKNOWN` (any unmapped fault).
+ * a non-IDB `await` deactivated its transaction — reachable through
+ * `IndexedDBTransactionStoreInterface`), `INVALID` (native `InvalidStateError` —
+ * a defensive mapping for a deleted store/index or similarly invalid native
+ * handle; not cleanly reachable through this wrapper's public API, which always
+ * opens a fresh transaction or routes through the auto-commit-guarded
+ * transaction store above), and `UNKNOWN` (any unmapped fault).
  */
 export type IndexedDBErrorCode =
 	| 'NOT_OPEN'
@@ -135,13 +139,17 @@ export interface IndexedDBUpgradeContext {
  * bump. `upgrade` runs after the built-in create-missing-stores pass, inside the
  * same versionchange transaction — use it to drop a store, add or remove an index
  * on an existing store (via `context.transaction`), or migrate data with
- * `context.store(name)`.
+ * `context.store(name)`. It may return `void` or a `Promise<void>` — an async
+ * `upgrade` may `await` the IDB requests it issues through `context.store(...)`
+ * (see the auto-commit rule on {@link IndexedDBUpgradeContext}); a rejection
+ * aborts the versionchange transaction and rejects the pending `connect()` with
+ * an `IndexedDBError` (code `UPGRADE`) instead of an unhandled rejection.
  */
 export interface IndexedDBDatabaseOptions<Stores extends StoresShape = StoresShape> {
 	readonly name: string
 	readonly version?: number
 	readonly stores: Stores
-	readonly upgrade?: (context: IndexedDBUpgradeContext) => void
+	readonly upgrade?: (context: IndexedDBUpgradeContext) => void | Promise<void>
 }
 
 /**

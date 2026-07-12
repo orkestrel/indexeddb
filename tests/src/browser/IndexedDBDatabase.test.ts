@@ -291,6 +291,53 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		expect(await v2.store('users').get('u2')).toEqual({ id: 'u2', name: 'BEA' })
 	})
 
+	it('rejects connect() cleanly when an async upgrade throws after an awaited request', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		await v1.store('users').set({ id: 'u1', name: 'ada' })
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' } },
+			upgrade: async (context) => {
+				const store = context.store('users')
+				// Await a real IDB request first, so the versionchange transaction is
+				// still alive when the throw below happens.
+				await store.records()
+				throw new Error('migration boom')
+			},
+		})
+		cleanups.push(async () => {
+			v2.close()
+			await deleteDatabase(name)
+		})
+
+		const caught = await v2.connect().catch((error: unknown) => error)
+		expect(caught).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(caught)).toBe('UPGRADE')
+		expect(v2.open).toBe(false)
+
+		// The upgrade never half-applied: the database is still at version 1, and a
+		// fresh connection without the throwing upgrade opens it cleanly and reads
+		// the pre-upgrade data back untouched.
+		const reopened = createIndexedDBDatabase({
+			name,
+			version: 1,
+			stores: { users: { path: 'id' } },
+		})
+		cleanups.push(async () => {
+			reopened.close()
+			await deleteDatabase(name)
+		})
+		await reopened.connect()
+		expect(reopened.version).toBe(1)
+		expect(await reopened.store('users').get('u1')).toEqual({ id: 'u1', name: 'ada' })
+	})
+
 	it('creates a store via context.create, honouring its definition', async () => {
 		const name = uniqueName()
 		await deleteDatabase(name)
@@ -374,6 +421,43 @@ describe('IndexedDBDatabase — versionchange yields a live connection', () => {
 		await second.connect()
 		expect(second.open).toBe(true)
 		expect(second.version).toBe(2)
+	})
+
+	it('lazily reconnects a yielded handle at the new version on the next operation', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		// Auto-managed (no pinned `version`): the lazy reconnect below re-opens
+		// without a fixed version, so it naturally lands on whatever version is
+		// current — a pinned-version handle would instead throw `VersionError`
+		// reconnecting below a version another connection already bumped past.
+		const first = createIndexedDBDatabase({ name, stores: { users: { path: 'id' } } })
+		await first.connect()
+		await first.store('users').set({ id: 'u1', name: 'Ada' })
+
+		const second = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' }, posts: { path: 'id' } },
+		})
+		cleanups.push(async () => {
+			first.close()
+			second.close()
+			await deleteDatabase(name)
+		})
+		await second.connect()
+
+		// The yielded `first` handle reports closed — a self-initiated `close()`
+		// inside `onversionchange`, which does not fire the native `close` event, so
+		// the reconnect latches must be cleared explicitly.
+		expect(first.open).toBe(false)
+
+		// A subsequent operation on `first` lazily reconnects instead of throwing
+		// NOT_OPEN forever, landing on the NEW version with the new store visible.
+		const record = await first.store('users').get('u1')
+		expect(record).toEqual({ id: 'u1', name: 'Ada' })
+		expect(first.open).toBe(true)
+		expect(first.version).toBe(2)
+		expect([...first.stores].sort()).toEqual(['posts', 'users'])
 	})
 })
 
