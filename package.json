@@ -26,6 +26,7 @@
 	"type": "module",
 	"sideEffects": false,
 	"main": "./dist/src/browser/index.js",
+	"module": "./dist/src/browser/index.js",
 	"types": "./dist/src/browser/index.d.ts",
 	"exports": {
 		".": {
@@ -55,13 +56,14 @@
 		"test:guides": "vitest run --config vite.config.ts --reporter=dot --project guides",
 		"build": "npm run clean && npm run build:src",
 		"build:src": "npm run build:src:browser",
-		"build:src:browser": "vite build --config configs/src/vite.browser.config.ts && tsc -p configs/src/tsconfig.browser.json",
+		"build:src:browser": "vite build --config configs/src/vite.browser.config.ts",
 		"prepublishOnly": "npm run format:check && npm run lint:check && npm run check && npm run check:src && npm run build && npm test"
 	},
 	"dependencies": {
 		"@orkestrel/contract": "^0.0.1"
 	},
 	"devDependencies": {
+		"@microsoft/api-extractor": "^7.58.9",
 		"@orkestrel/guide": "^0.0.1",
 		"@types/node": "^26.1.1",
 		"@vitest/browser-playwright": "^4.1.10",
@@ -69,6 +71,7 @@
 		"oxlint": "^1.73.0",
 		"typescript": "^6.0.3",
 		"vite": "^8.1.4",
+		"vite-plugin-dts": "^5.0.3",
 		"vitest": "^4.1.10"
 	},
 	"engines": {

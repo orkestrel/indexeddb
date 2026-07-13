@@ -71,6 +71,9 @@ export const srcBrowser = (config?: UserConfig): UserConfig =>
 					fileName: () => 'index.js',
 				},
 				outDir: 'dist/src/browser',
+				rolldownOptions: {
+					external: (id: string) => id.startsWith('node:') || id.startsWith('@orkestrel/'),
+				},
 			},
 			test: {
 				name: { label: 'src:browser', color: 'yellow' },
