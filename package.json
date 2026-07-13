@@ -1,6 +1,6 @@
 {
 	"name": "@orkestrel/indexeddb",
-	"version": "0.0.3",
+	"version": "0.0.2",
 	"description": "A typed, Promise-based wrapper over browser IndexedDB — object stores, secondary indexes, native key ranges, cursors, and versioned schema upgrades. Part of the @orkestrel line.",
 	"keywords": [
 		"browser",
