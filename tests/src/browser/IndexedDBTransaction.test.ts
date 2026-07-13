@@ -108,7 +108,7 @@ describe('IndexedDBTransaction — abort', () => {
 		expect(await db.store('users').get('u2')).toBeUndefined()
 	})
 
-	it('throws ABORTED when aborting an already-finished transaction', async () => {
+	it('throws INACTIVE when aborting an already-finished transaction', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		cleanups.push(cleanup)
 		let caught: unknown
@@ -123,7 +123,7 @@ describe('IndexedDBTransaction — abort', () => {
 			})
 			.catch(() => {})
 		expect(caught).toBeInstanceOf(IndexedDBError)
-		expect(errorCode(caught)).toBe('ABORTED')
+		expect(errorCode(caught)).toBe('INACTIVE')
 	})
 })
 
@@ -138,7 +138,7 @@ describe('IndexedDBTransaction — commit', () => {
 		expect(await db.store('users').get('u1')).toEqual({ id: 'u1', name: 'Ada' })
 	})
 
-	it('throws ABORTED when committing an already-finished transaction', async () => {
+	it('throws INACTIVE when committing an already-finished transaction', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		cleanups.push(cleanup)
 		let caught: unknown
@@ -153,6 +153,6 @@ describe('IndexedDBTransaction — commit', () => {
 			})
 			.catch(() => {})
 		expect(caught).toBeInstanceOf(IndexedDBError)
-		expect(errorCode(caught)).toBe('ABORTED')
+		expect(errorCode(caught)).toBe('INACTIVE')
 	})
 })

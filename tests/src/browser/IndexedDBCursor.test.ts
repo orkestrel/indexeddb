@@ -1,6 +1,12 @@
-import { range } from '@src/browser'
+import { IndexedDBError, range } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createCleanups, createTestDatabase, drainCursor, seedStore } from '../../setupBrowser.js'
+import {
+	createCleanups,
+	createTestDatabase,
+	drainCursor,
+	errorCode,
+	seedStore,
+} from '../../setupBrowser.js'
 
 // `IndexedDBCursorInterface` in real Chromium, obtained from a store or index
 // cursor: the position snapshot (`cursor` / `source` / `key` / `primary` /
@@ -126,7 +132,7 @@ describe('IndexedDBCursor — in-place mutation', () => {
 		expect(cursor.value).toEqual({ id: 'a', n: 99 })
 	})
 
-	it('rejects update / delete on an index cursor (its transaction is readonly)', async () => {
+	it('rejects update on an index cursor with READONLY (its transaction is readonly)', async () => {
 		const { db, cleanup } = await createTestDatabase({
 			users: { path: 'id', indexes: [{ name: 'byAge', path: 'age' }] },
 		})
@@ -136,8 +142,27 @@ describe('IndexedDBCursor — in-place mutation', () => {
 		expect(cursor).not.toBeNull()
 		if (!cursor) return
 		const onUpdate = await cursor.update({ id: 'a', age: 21 }).catch((error: unknown) => error)
-		expect(onUpdate).toBeInstanceOf(Error)
+		expect(onUpdate).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(onUpdate)).toBe('READONLY')
 		// The store still holds the original row — the readonly cursor could not write.
+		expect(await db.store('users').get('a')).toEqual({ id: 'a', age: 20 })
+	})
+
+	it('rejects delete on an index cursor with READONLY (its transaction is readonly)', async () => {
+		const { db, cleanup } = await createTestDatabase({
+			users: { path: 'id', indexes: [{ name: 'byAge', path: 'age' }] },
+		})
+		cleanups.push(cleanup)
+		await db.store('users').set({ id: 'a', age: 20 })
+		// A fresh cursor for `delete` — a failed `update` above can invalidate its
+		// own cursor/request, so `delete` is asserted on an independent cursor
+		// rather than chained after a failed `update` on the same one.
+		const cursor = await db.store('users').index('byAge').cursor()
+		expect(cursor).not.toBeNull()
+		if (!cursor) return
+		const onDelete = await cursor.delete().catch((error: unknown) => error)
+		expect(onDelete).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(onDelete)).toBe('READONLY')
 		expect(await db.store('users').get('a')).toEqual({ id: 'a', age: 20 })
 	})
 })

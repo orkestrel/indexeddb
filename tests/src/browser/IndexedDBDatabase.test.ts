@@ -6,7 +6,7 @@ import {
 	promisifyTransaction,
 } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { captureError } from '../../setup.js'
+import { captureError, waitForDelay } from '../../setup.js'
 import {
 	createCleanups,
 	createTestDatabase,
@@ -133,6 +133,20 @@ describe('IndexedDBDatabase — read / write scopes', () => {
 		// Aborted: neither write survived.
 		expect(await db.store('users').get('u1')).toEqual({ id: 'u1', n: 1 })
 		expect(await db.store('users').get('u2')).toBeUndefined()
+	})
+
+	it('settles when the scope ends on a trailing non-IDB await (auto-commit race)', async () => {
+		// A scope whose last step is a non-IDB await lets the transaction
+		// auto-commit before `#run` would otherwise attach its completion
+		// listener — proving the listener is wired BEFORE the scope runs, not
+		// after, so `write` resolves instead of hanging forever.
+		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
+		cleanups.push(cleanup)
+		await db.write('users', async (tx) => {
+			await tx.store('users').set({ id: 'u1', name: 'Ada' })
+			await waitForDelay(10) // non-IDB await — the transaction auto-commits here
+		})
+		expect(await db.store('users').get('u1')).toEqual({ id: 'u1', name: 'Ada' })
 	})
 
 	it('reads within a readonly scope', async () => {
@@ -437,6 +451,56 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		expect(record).toEqual({ id: 'l1', message: 'hi' })
 	})
 
+	it('surfaces a typed IndexedDBError when context.drop targets a missing store', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' } },
+			upgrade: (context) => {
+				context.drop('missing')
+			},
+		})
+		cleanups.push(async () => {
+			v2.close()
+			await deleteDatabase(name)
+		})
+		const caught = await v2.connect().catch((error: unknown) => error)
+		expect(caught).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(caught)).toBe('UPGRADE')
+		expect(v2.open).toBe(false)
+	})
+
+	it('surfaces a typed IndexedDBError when context.deindex targets a missing index', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' } },
+			upgrade: (context) => {
+				context.deindex('users', 'missing')
+			},
+		})
+		cleanups.push(async () => {
+			v2.close()
+			await deleteDatabase(name)
+		})
+		const caught = await v2.connect().catch((error: unknown) => error)
+		expect(caught).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(caught)).toBe('UPGRADE')
+		expect(v2.open).toBe(false)
+	})
+
 	it('exposes old / version / stores correctly on the context', async () => {
 		const name = uniqueName()
 		await deleteDatabase(name)
@@ -528,6 +592,28 @@ describe('IndexedDBDatabase — versionchange yields a live connection', () => {
 		expect(first.open).toBe(true)
 		expect(first.version).toBe(2)
 		expect([...first.stores].sort()).toEqual(['posts', 'users'])
+	})
+})
+
+describe('IndexedDBDatabase — abnormal close recovery', () => {
+	it('lazily reconnects after an external onclose fires, instead of staying invalid forever', async () => {
+		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
+		cleanups.push(cleanup)
+		await db.store('users').set({ id: 'u1', name: 'Ada' })
+		expect(db.open).toBe(true)
+
+		// Simulate a browser-initiated close (crash, eviction) by invoking the
+		// native `onclose` handler directly on the live connection — this is NOT
+		// the self-initiated `close()` path (which never fires `onclose`).
+		const native = db.database
+		native.onclose?.(new Event('close'))
+		expect(db.open).toBe(false)
+
+		// The next operation must lazily reconnect rather than throwing NOT_OPEN
+		// forever — proving `onclose` cleared BOTH latches, not just `#database`.
+		const record = await db.store('users').get('u1')
+		expect(record).toEqual({ id: 'u1', name: 'Ada' })
+		expect(db.open).toBe(true)
 	})
 })
 

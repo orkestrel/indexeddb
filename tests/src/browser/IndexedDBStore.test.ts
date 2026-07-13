@@ -92,6 +92,17 @@ describe('IndexedDBStore — keyed CRUD', () => {
 		expect(await users.get('u2')).toEqual({ id: 'u2', name: 'Ada' }) // unchanged
 	})
 
+	it('rejects a non-cloneable value with DATA', async () => {
+		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
+		cleanups.push(cleanup)
+		const users = db.store('users')
+		// A function is not structured-clonable — the native put throws
+		// DataCloneError, mapped to our DATA code.
+		const caught = await users.set({ id: 'u1', fn: () => 'nope' }).catch((error: unknown) => error)
+		expect(caught).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(caught)).toBe('DATA')
+	})
+
 	it('lists keys and records in key order, caps with count, and clears', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		cleanups.push(cleanup)

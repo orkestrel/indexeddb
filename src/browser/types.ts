@@ -32,15 +32,20 @@ export type Row = Record<string, unknown>
  * `NOT_OPEN` (used before `connect`), `CLOSED` (used after `close`), `NOT_FOUND`
  * (a `resolve` miss), `CONSTRAINT` (a unique-key violation), `QUOTA` (storage
  * full), `ABORTED` (a transaction rolled back), `BLOCKED` (an open held up by
- * another live connection), `DATA` (an invalid key or value), `OPEN` /
+ * another live connection), `DATA` (an invalid key or an un-clonable value —
+ * native `DataError` and `DataCloneError` both map here), `OPEN` /
  * `UPGRADE` (a failed open or schema upgrade), `INACTIVE` (the transaction went
  * inactive — IndexedDB's auto-commit fault, raised when an operation runs after
  * a non-IDB `await` deactivated its transaction — reachable through
- * `IndexedDBTransactionStoreInterface`), `INVALID` (native `InvalidStateError` —
- * a defensive mapping for a deleted store/index or similarly invalid native
- * handle; not cleanly reachable through this wrapper's public API, which always
- * opens a fresh transaction or routes through the auto-commit-guarded
- * transaction store above), and `UNKNOWN` (any unmapped fault).
+ * `IndexedDBTransactionStoreInterface`, and when `IndexedDBTransactionInterface`'s
+ * `abort` / `commit` are called on an already-finished transaction), `READONLY`
+ * (native `ReadOnlyError` — a write attempted on a `readonly` transaction, e.g.
+ * mutating through a cursor opened in a `read` scope), `INVALID` (native
+ * `InvalidStateError` — a defensive mapping for a deleted store/index or
+ * similarly invalid native handle; not cleanly reachable through this
+ * wrapper's public API, which always opens a fresh transaction or routes
+ * through the auto-commit-guarded transaction store above), and `UNKNOWN` (any
+ * unmapped fault).
  */
 export type IndexedDBErrorCode =
 	| 'NOT_OPEN'
@@ -54,6 +59,7 @@ export type IndexedDBErrorCode =
 	| 'OPEN'
 	| 'UPGRADE'
 	| 'INACTIVE'
+	| 'READONLY'
 	| 'INVALID'
 	| 'UNKNOWN'
 

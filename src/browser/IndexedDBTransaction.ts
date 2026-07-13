@@ -4,6 +4,7 @@ import type {
 	StoresShape,
 } from './types.js'
 import { IndexedDBError } from './errors.js'
+import { guardSync } from './helpers.js'
 import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
 
 /**
@@ -81,18 +82,22 @@ export class IndexedDBTransaction<
 	}
 
 	abort(): void {
+		// An already-finished transaction is no longer active, not "aborted" — a
+		// transaction that committed cleanly was never aborted at all. INACTIVE
+		// matches the native `TransactionInactiveError` this same call raises when
+		// the transaction has auto-committed out from under the caller.
 		if (this.#finished) {
-			throw new IndexedDBError('ABORTED', 'Cannot abort an already-finished transaction')
+			throw new IndexedDBError('INACTIVE', 'Cannot abort an already-finished transaction')
 		}
-		this.#transaction.abort()
+		guardSync(() => this.#transaction.abort())
 		this.#active = false
 		this.#finished = true
 	}
 
 	commit(): void {
 		if (this.#finished) {
-			throw new IndexedDBError('ABORTED', 'Cannot commit an already-finished transaction')
+			throw new IndexedDBError('INACTIVE', 'Cannot commit an already-finished transaction')
 		}
-		this.#transaction.commit()
+		guardSync(() => this.#transaction.commit())
 	}
 }

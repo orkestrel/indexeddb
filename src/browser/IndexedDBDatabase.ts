@@ -157,9 +157,14 @@ export class IndexedDBDatabase<
 		const names = isArray<string>(stores) ? [...stores] : [stores]
 		const native = guardSync(() => database.transaction(names, mode))
 		const tx = new IndexedDBTransaction<Stores>(native)
+		// Attach the completion listeners BEFORE invoking `scope` — a scope that
+		// ends on a trailing non-IDB `await` lets the transaction auto-commit, and
+		// `complete` can fire before a listener attached only after `scope` returns
+		// would ever be wired, hanging this call forever.
+		const settled = promisifyTransaction(native)
 		try {
 			await scope(tx)
-			await promisifyTransaction(native)
+			await settled
 		} catch (error) {
 			if (tx.active) {
 				try {
@@ -168,6 +173,11 @@ export class IndexedDBDatabase<
 					// Already settled by the native transaction — nothing to roll back.
 				}
 			}
+			// `settled` may still reject (the abort above, or the native transaction
+			// having already aborted/errored) after `scope` already threw — that
+			// rejection is redundant with `error` below and must not surface as an
+			// unhandled rejection.
+			settled.catch(() => {})
 			throw error
 		}
 	}
@@ -185,8 +195,13 @@ export class IndexedDBDatabase<
 				database = await this.#request(next)
 			}
 		}
+		// An abnormal, browser-initiated close (a crashed extension, storage
+		// eviction) fires this event — clear BOTH latches, mirroring
+		// `onversionchange` below, so a later operation lazily reconnects instead
+		// of finding a stale resolved `#opening` for a connection that is now dead.
 		database.onclose = () => {
 			this.#database = undefined
+			this.#opening = undefined
 		}
 		// Yield to another context's version-change upgrade instead of blocking it
 		// indefinitely — without this, two tabs over the same database hang: the
@@ -227,17 +242,33 @@ export class IndexedDBDatabase<
 				if (this.#upgrade !== undefined) {
 					const transaction = request.transaction
 					if (transaction !== null) {
-						const result = this.#upgrade(this.#context(database, transaction, event))
-						if (result !== undefined) {
-							result.catch((error: unknown) => {
-								upgradeError = error
-								try {
-									transaction.abort()
-								} catch {
-									// Already settled — the versionchange transaction committed or
-									// aborted before the rejection arrived; nothing to roll back.
-								}
-							})
+						// A mutator on the upgrade context (`create` / `drop` / `store` /
+						// `index` / `deindex`) is guarded with `guardSync`, so a bad target
+						// throws a typed `IndexedDBError` SYNCHRONOUSLY from `this.#upgrade`
+						// here — caught the same way as an async upgrade's rejection below,
+						// so it aborts the transaction and fails `connect()` with `UPGRADE`
+						// instead of escaping as an unhandled exception from this event
+						// handler.
+						try {
+							const result = this.#upgrade(this.#context(database, transaction, event))
+							if (result !== undefined) {
+								result.catch((error: unknown) => {
+									upgradeError = error
+									try {
+										transaction.abort()
+									} catch {
+										// Already settled — the versionchange transaction committed or
+										// aborted before the rejection arrived; nothing to roll back.
+									}
+								})
+							}
+						} catch (error) {
+							upgradeError = error
+							try {
+								transaction.abort()
+							} catch {
+								// Already settled — nothing to roll back.
+							}
 						}
 					}
 				}
@@ -274,17 +305,18 @@ export class IndexedDBDatabase<
 			version: event.newVersion ?? database.version,
 			stores: Array.from(database.objectStoreNames),
 			create: (name, definition) => {
-				this.#createStore(database, name, definition)
+				guardSync(() => this.#createStore(database, name, definition))
 			},
 			drop: (name) => {
-				database.deleteObjectStore(name)
+				guardSync(() => database.deleteObjectStore(name))
 			},
-			store: (name) => new IndexedDBTransactionStore(transaction.objectStore(name)),
+			store: (name) =>
+				new IndexedDBTransactionStore(guardSync(() => transaction.objectStore(name))),
 			index: (store, definition) => {
-				createIndex(transaction.objectStore(store), definition)
+				guardSync(() => createIndex(transaction.objectStore(store), definition))
 			},
 			deindex: (store, name) => {
-				transaction.objectStore(store).deleteIndex(name)
+				guardSync(() => transaction.objectStore(store).deleteIndex(name))
 			},
 		}
 	}

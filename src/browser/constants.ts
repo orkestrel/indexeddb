@@ -14,7 +14,9 @@ export const ERROR_CODES: Readonly<Record<string, IndexedDBErrorCode>> = Object.
 	AbortError: 'ABORTED',
 	NotFoundError: 'NOT_FOUND',
 	DataError: 'DATA',
+	DataCloneError: 'DATA',
 	VersionError: 'UPGRADE',
 	TransactionInactiveError: 'INACTIVE',
 	InvalidStateError: 'INVALID',
+	ReadOnlyError: 'READONLY',
 })
