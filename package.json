@@ -1,6 +1,6 @@
 {
 	"name": "@orkestrel/indexeddb",
-	"version": "0.0.2",
+	"version": "0.0.3",
 	"description": "A typed, Promise-based wrapper over browser IndexedDB — object stores, secondary indexes, native key ranges, cursors, and versioned schema upgrades. Part of the @orkestrel line.",
 	"keywords": [
 		"browser",
@@ -44,7 +44,7 @@
 		"copy": "node -e \"const fs=require('node:fs'),p=require('node:path'),a=process.argv[1],b=process.argv[2];fs.mkdirSync(p.dirname(b),{recursive:true});fs.cpSync(a,b,{force:true});console.log('Copied: '+a+' to '+b)\"",
 		"tmp:txt": "node -e \"const fs=require('node:fs'),p=require('node:path');function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory()){walk(f)}else if(!e.name.endsWith('.md')&&!e.name.endsWith('.txt')){const t=f+'.txt';if(!fs.existsSync(t)){fs.renameSync(f,t)}else{console.warn('Skipping '+f+' — target exists: '+t)}}}}try{walk('tmp')}catch(e){if(e.code!=='ENOENT')throw e}\"",
 		"lint": "oxlint --config .oxlintrc.json --fix .",
-		"check": "tsc --noEmit --project tsconfig.json",
+		"check": "tsc --noEmit --project tsconfig.json && npm run check:src",
 		"check:src": "npm run check:src:browser",
 		"check:src:browser": "tsc --noEmit -p configs/src/tsconfig.browser.json",
 		"format": "oxfmt --config .oxfmtrc.json --write .",
@@ -57,24 +57,24 @@
 		"build": "npm run clean && npm run build:src",
 		"build:src": "npm run build:src:browser",
 		"build:src:browser": "vite build --config configs/src/vite.browser.config.ts",
-		"prepublishOnly": "npm run format:check && npm run lint:check && npm run check && npm run check:src && npm run build && npm test"
+		"prepublishOnly": "npm run format:check && npm run lint:check && npm run check && npm run build && npm test"
 	},
 	"dependencies": {
-		"@orkestrel/contract": "^0.0.1"
+		"@orkestrel/contract": "^0.0.2"
 	},
 	"devDependencies": {
-		"@microsoft/api-extractor": "^7.58.9",
-		"@orkestrel/guide": "^0.0.1",
+		"@microsoft/api-extractor": "^7.58.11",
+		"@orkestrel/guide": "^0.0.2",
 		"@types/node": "^26.1.1",
 		"@vitest/browser-playwright": "^4.1.10",
-		"oxfmt": "^0.58.0",
-		"oxlint": "^1.73.0",
+		"oxfmt": "^0.59.0",
+		"oxlint": "^1.74.0",
 		"typescript": "^6.0.3",
-		"vite": "^8.1.4",
+		"vite": "^8.1.5",
 		"vite-plugin-dts": "^5.0.3",
 		"vitest": "^4.1.10"
 	},
 	"engines": {
-		"node": ">=24"
+		"node": ">=22"
 	}
 }
