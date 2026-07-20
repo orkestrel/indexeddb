@@ -9,23 +9,6 @@ export function resolveWorkspacePath(relativePath: string): string {
 	return fileURLToPath(new URL(relativePath, import.meta.url))
 }
 
-/**
- * Resolve the Playwright browser provider, by precedence — one self-contained
- * function covering every environment (Windows, macOS, Linux, Claude Code Cloud):
- *
- *   1. `PLAYWRIGHT_EXECUTABLE_PATH` — an explicit browser binary (CI / pinned).
- *   2. `PLAYWRIGHT_WS_ENDPOINT`     — a CDP / WebSocket endpoint of an already-
- *      running browser (remote debugging, a browser-tools MCP, etc.).
- *   3. `PLAYWRIGHT_CHANNEL`         — an explicit channel (`chrome`, `msedge`,
- *      `chromium`, …) for local dev loops.
- *   4. Claude Code / Claude Cloud  — the bundled chromium under
- *      `/opt/pw-browsers/`. The revision dir AND its inner layout drift across
- *      Playwright builds, plus a top-level `chromium` symlink points at the
- *      installed binary — so glob every known shape and take the highest match.
- *   5. Platform default — Windows → `msedge` (ships with the OS, never collides
- *      with a foreground Chrome); macOS / Linux → `chrome`. Override with
- *      `PLAYWRIGHT_CHANNEL` when the default isn't installed.
- */
 export function createBrowserProvider() {
 	const { PLAYWRIGHT_EXECUTABLE_PATH, PLAYWRIGHT_WS_ENDPOINT, PLAYWRIGHT_CHANNEL } = process.env
 	if (PLAYWRIGHT_EXECUTABLE_PATH)
@@ -54,9 +37,6 @@ const resolve = {
 	),
 }
 
-// Base: the published browser-only library (`src/browser`, the typed IndexedDB
-// wrapper). Builds an ES lib and runs its tests in a real Chromium via
-// Playwright, where DOM and `indexedDB` are available.
 export const srcBrowser = (config?: UserConfig): UserConfig =>
 	mergeConfig(
 		{
@@ -72,7 +52,7 @@ export const srcBrowser = (config?: UserConfig): UserConfig =>
 				},
 				outDir: 'dist/src/browser',
 				rolldownOptions: {
-					external: (id: string) => id.startsWith('node:') || id.startsWith('@orkestrel/'),
+					external: (id: string) => id.startsWith('@orkestrel/'),
 				},
 			},
 			test: {
@@ -90,9 +70,6 @@ export const srcBrowser = (config?: UserConfig): UserConfig =>
 		config ?? {},
 	)
 
-// Extends srcBrowser: the guides-parity suite. Node env — it reads the real
-// guides/*.md and the documented source modules off disk — but resolves like
-// the browser project.
 export const guides = (config?: UserConfig): UserConfig =>
 	srcBrowser(
 		mergeConfig(
