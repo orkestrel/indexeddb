@@ -76,7 +76,7 @@ export async function createTestDatabase<const Stores extends StoresShape>(
 	const name = uniqueName(options?.prefix)
 	const db = createIndexedDBDatabase({
 		name,
-		version: options?.version,
+		...(options?.version === undefined ? {} : { version: options.version }),
 		stores,
 	})
 	await db.connect()

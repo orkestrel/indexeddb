@@ -1,5 +1,5 @@
 // Public barrel for src/browser — the typed, Promise-based IndexedDB wrapper.
-export type * from './types.js'
+export * from './types.js'
 export * from './constants.js'
 export * from './errors.js'
 export * from './helpers.js'
