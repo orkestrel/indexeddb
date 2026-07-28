@@ -1,5 +1,5 @@
 import type { IndexedDBTransactionStoreInterface } from '@src/browser'
-import { IndexedDBError, range } from '@src/browser'
+import { IndexedDBError, rangeFromKey } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import { waitForDelay } from '../../setup.js'
 import { createCleanups, createTestDatabase, drainCursor, errorCode } from '../../setupBrowser.js'
@@ -87,7 +87,7 @@ describe('IndexedDBTransactionStore — CRUD within a scope', () => {
 			const users = tx.store('users')
 			await users.set([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
 			expect(await users.keys()).toEqual(['a', 'b', 'c'])
-			expect((await users.records(range.from('b'))).map((row) => row.id)).toEqual(['b', 'c'])
+			expect((await users.records(rangeFromKey('b'))).map((row) => row.id)).toEqual(['b', 'c'])
 			expect((await users.records(undefined, 2)).length).toBe(2)
 		})
 		await db.write('users', async (tx) => {

@@ -5,6 +5,7 @@ import type {
 	IndexedDBStoreInterface,
 	IndexedDBTransactionInterface,
 	IndexedDBUpgradeContext,
+	IndexDefinition,
 	StoreDefinition,
 	StoresShape,
 } from './types.js'
@@ -132,18 +133,20 @@ export class IndexedDBDatabase<
 		this.close()
 		return new Promise((resolve, reject) => {
 			const request = globalThis.indexedDB.deleteDatabase(this.#name)
-			request.onsuccess = () => resolve()
-			request.onerror = () =>
+			request.addEventListener('success', () => resolve())
+			request.addEventListener('error', () =>
 				reject(
 					new IndexedDBError('UNKNOWN', `Failed to delete database '${this.#name}'`, request.error),
-				)
-			request.onblocked = () =>
+				),
+			)
+			request.addEventListener('blocked', () =>
 				reject(
 					new IndexedDBError(
 						'BLOCKED',
 						`Deletion of '${this.#name}' is blocked by another connection`,
 					),
-				)
+				),
+			)
 		})
 	}
 
@@ -199,10 +202,7 @@ export class IndexedDBDatabase<
 		// eviction) fires this event — clear BOTH latches, mirroring
 		// `onversionchange` below, so a later operation lazily reconnects instead
 		// of finding a stale resolved `#opening` for a connection that is now dead.
-		database.onclose = () => {
-			this.#database = undefined
-			this.#opening = undefined
-		}
+		database.onclose = this.#clearConnection.bind(this)
 		// Yield to another context's version-change upgrade instead of blocking it
 		// indefinitely — without this, two tabs over the same database hang: the
 		// second tab's `open` sits in `onblocked` forever because this connection
@@ -211,11 +211,7 @@ export class IndexedDBDatabase<
 		// reason other than `close()` itself) — clear the same latches `onclose`
 		// clears so a later operation on this handle lazily reconnects instead of
 		// forever holding a closed `#database`.
-		database.onversionchange = () => {
-			database.close()
-			this.#database = undefined
-			this.#opening = undefined
-		}
+		database.onversionchange = this.#yieldConnection.bind(this, database)
 		this.#database = database
 		return database
 	}
@@ -232,7 +228,7 @@ export class IndexedDBDatabase<
 				version === undefined
 					? globalThis.indexedDB.open(this.#name)
 					: globalThis.indexedDB.open(this.#name, version)
-			request.onupgradeneeded = (event) => {
+			request.addEventListener('upgradeneeded', (event) => {
 				const database = request.result
 				for (const [name, definition] of Object.entries(this.#stores)) {
 					if (!database.objectStoreNames.contains(name)) {
@@ -272,18 +268,20 @@ export class IndexedDBDatabase<
 						}
 					}
 				}
-			}
-			request.onsuccess = () => resolve(request.result)
-			request.onerror = () =>
+			})
+			request.addEventListener('success', () => resolve(request.result))
+			request.addEventListener('error', () =>
 				reject(
 					upgradeError !== undefined
 						? new IndexedDBError('UPGRADE', `Upgrade of '${this.#name}' failed`, upgradeError)
 						: new IndexedDBError('OPEN', `Failed to open database '${this.#name}'`, request.error),
-				)
-			request.onblocked = () =>
+				),
+			)
+			request.addEventListener('blocked', () =>
 				reject(
 					new IndexedDBError('BLOCKED', `Open of '${this.#name}' is blocked by another connection`),
-				)
+				),
+			)
 		})
 	}
 
@@ -304,21 +302,46 @@ export class IndexedDBDatabase<
 			old: event.oldVersion,
 			version: event.newVersion ?? database.version,
 			stores: Array.from(database.objectStoreNames),
-			create: (name, definition) => {
-				guardSync(() => this.#createStore(database, name, definition))
-			},
-			drop: (name) => {
-				guardSync(() => database.deleteObjectStore(name))
-			},
-			store: (name) =>
-				new IndexedDBTransactionStore(guardSync(() => transaction.objectStore(name))),
-			index: (store, definition) => {
-				guardSync(() => createIndex(transaction.objectStore(store), definition))
-			},
-			deindex: (store, name) => {
-				guardSync(() => transaction.objectStore(store).deleteIndex(name))
-			},
+			create: this.#createUpgradeStore.bind(this, database),
+			drop: this.#dropUpgradeStore.bind(this, database),
+			store: this.#reachUpgradeStore.bind(this, transaction),
+			index: this.#createUpgradeIndex.bind(this, transaction),
+			deindex: this.#dropUpgradeIndex.bind(this, transaction),
 		}
+	}
+
+	#clearConnection(): void {
+		this.#database = undefined
+		this.#opening = undefined
+	}
+
+	#yieldConnection(database: IDBDatabase): void {
+		database.close()
+		this.#clearConnection()
+	}
+
+	#createUpgradeStore(database: IDBDatabase, name: string, definition: StoreDefinition): void {
+		guardSync(() => this.#createStore(database, name, definition))
+	}
+
+	#dropUpgradeStore(database: IDBDatabase, name: string): void {
+		guardSync(() => database.deleteObjectStore(name))
+	}
+
+	#reachUpgradeStore(transaction: IDBTransaction, name: string): IndexedDBTransactionStore {
+		return new IndexedDBTransactionStore(guardSync(() => transaction.objectStore(name)))
+	}
+
+	#createUpgradeIndex(
+		transaction: IDBTransaction,
+		store: string,
+		definition: IndexDefinition,
+	): void {
+		guardSync(() => createIndex(transaction.objectStore(store), definition))
+	}
+
+	#dropUpgradeIndex(transaction: IDBTransaction, store: string, name: string): void {
+		guardSync(() => transaction.objectStore(store).deleteIndex(name))
 	}
 
 	#createStore(database: IDBDatabase, name: string, definition: StoreDefinition): void {

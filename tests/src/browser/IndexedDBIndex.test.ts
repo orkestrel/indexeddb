@@ -1,4 +1,4 @@
-import { IndexedDBError, range } from '@src/browser'
+import { IndexedDBError, rangeAboveKey, rangeBetweenKeys, rangeFromKey } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
 	createCleanups,
@@ -86,9 +86,9 @@ describe('IndexedDBIndex — key ranges', () => {
 	it('reads matching records over a key range, in index order', async () => {
 		const db = await seed()
 		const byAge = db.store('users').index('byAge')
-		expect((await byAge.records(range.from(30))).map((row) => row.id)).toEqual(['b', 'c'])
-		expect((await byAge.records(range.between(25, 45))).map((row) => row.id)).toEqual(['b', 'c'])
-		expect(await byAge.count(range.above(20))).toBe(2)
+		expect((await byAge.records(rangeFromKey(30))).map((row) => row.id)).toEqual(['b', 'c'])
+		expect((await byAge.records(rangeBetweenKeys(25, 45))).map((row) => row.id)).toEqual(['b', 'c'])
+		expect(await byAge.count(rangeAboveKey(20))).toBe(2)
 		expect(await byAge.count()).toBe(3)
 	})
 
@@ -97,7 +97,7 @@ describe('IndexedDBIndex — key ranges', () => {
 		const byAge = db.store('users').index('byAge')
 		// Index keys are ages; `keys` yields the primary keys of the matches in
 		// index order — proving the index → primary mapping, not the index values.
-		expect(await byAge.keys(range.from(30))).toEqual(['b', 'c'])
+		expect(await byAge.keys(rangeFromKey(30))).toEqual(['b', 'c'])
 		expect(await byAge.keys()).toEqual(['a', 'b', 'c'])
 	})
 })
@@ -155,6 +155,6 @@ describe('IndexedDBIndex — cursor', () => {
 		expect(seen.map((cursor) => cursor.key)).toEqual([20, 30, 40])
 		expect(seen.map((cursor) => cursor.primary)).toEqual(['a', 'b', 'c'])
 
-		expect(await byAge.cursor({ query: range.above(40) })).toBeNull()
+		expect(await byAge.cursor({ query: rangeAboveKey(40) })).toBeNull()
 	})
 })

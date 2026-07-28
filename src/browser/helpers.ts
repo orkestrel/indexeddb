@@ -7,9 +7,9 @@ import { IndexedDBError } from './errors.js'
 // consumer runs *before* entering the rest of this module (`isIndexedDBSupported`,
 // to fall back to another storage strategy where storage is absent), and the
 // wrapper's foundation — the two Promise bridges every class builds on
-// (`IDBRequest` → value, `IDBTransaction` → completion), the `range` key-range
-// builders that stand in for a query DSL, and the small read primitives the
-// store / index / transaction-store classes share over a native
+// (`IDBRequest` → value, `IDBTransaction` → completion), the key-range builders
+// that stand in for a query DSL, and the small read primitives the store /
+// index / transaction-store classes share over a native
 // `IDBObjectStore | IDBIndex`, each narrowing the structured clone to a `Row`
 // with `isRecord` at the boundary (the same `as`-free bridge used throughout).
 
@@ -40,8 +40,8 @@ export function isIndexedDBSupported(): boolean {
  */
 export function promisifyRequest<T>(request: IDBRequest<T>): Promise<T> {
 	return new Promise((resolve, reject) => {
-		request.onsuccess = () => resolve(request.result)
-		request.onerror = () => reject(wrapError(request.error))
+		request.addEventListener('success', () => resolve(request.result))
+		request.addEventListener('error', () => reject(wrapError(request.error)))
 	})
 }
 
@@ -179,43 +179,82 @@ export function createIndex(store: IDBObjectStore, definition: IndexDefinition):
 }
 
 /**
- * Key-range builders — the wrapper's filter vocabulary.
+ * Build a key range matching exactly one key.
  *
- * @remarks
- * Each returns an `IDBKeyRange` to pass to `records` / `keys` / `count` / `cursor`,
- * so a read is index-backed (O(log n)) rather than a full scan. `only` (exact),
- * `above` / `from` (greater than, exclusive / inclusive), `below` / `to` (less
- * than, exclusive / inclusive), `between` (bounded), and `prefix` (string
- * starts-with).
+ * @param value - The sole key in the range
+ * @returns A closed range containing only `value`
  */
-export const range = {
-	only(value: IDBValidKey): IDBKeyRange {
-		return IDBKeyRange.only(value)
-	},
-	above(value: IDBValidKey): IDBKeyRange {
-		return IDBKeyRange.lowerBound(value, true)
-	},
-	from(value: IDBValidKey): IDBKeyRange {
-		return IDBKeyRange.lowerBound(value, false)
-	},
-	below(value: IDBValidKey): IDBKeyRange {
-		return IDBKeyRange.upperBound(value, true)
-	},
-	to(value: IDBValidKey): IDBKeyRange {
-		return IDBKeyRange.upperBound(value, false)
-	},
-	between(
-		lower: IDBValidKey,
-		upper: IDBValidKey,
-		options?: { readonly lowerOpen?: boolean; readonly upperOpen?: boolean },
-	): IDBKeyRange {
-		return IDBKeyRange.bound(lower, upper, options?.lowerOpen ?? false, options?.upperOpen ?? false)
-	},
-	prefix(value: string): IDBKeyRange {
-		// Every string with this prefix: [value, value + U+FFFF]. U+FFFF sorts above
-		// any normal code unit, so it caps the range without excluding the prefix.
-		return IDBKeyRange.bound(value, value + '￿', false, false)
-	},
+export function rangeExactKey(value: IDBValidKey): IDBKeyRange {
+	return IDBKeyRange.only(value)
+}
+
+/**
+ * Build a key range strictly above one key.
+ *
+ * @param value - The excluded lower boundary
+ * @returns A range containing keys greater than `value`
+ */
+export function rangeAboveKey(value: IDBValidKey): IDBKeyRange {
+	return IDBKeyRange.lowerBound(value, true)
+}
+
+/**
+ * Build a key range starting at one key.
+ *
+ * @param value - The included lower boundary
+ * @returns A range containing keys greater than or equal to `value`
+ */
+export function rangeFromKey(value: IDBValidKey): IDBKeyRange {
+	return IDBKeyRange.lowerBound(value, false)
+}
+
+/**
+ * Build a key range strictly below one key.
+ *
+ * @param value - The excluded upper boundary
+ * @returns A range containing keys less than `value`
+ */
+export function rangeBelowKey(value: IDBValidKey): IDBKeyRange {
+	return IDBKeyRange.upperBound(value, true)
+}
+
+/**
+ * Build a key range ending at one key.
+ *
+ * @param value - The included upper boundary
+ * @returns A range containing keys less than or equal to `value`
+ */
+export function rangeToKey(value: IDBValidKey): IDBKeyRange {
+	return IDBKeyRange.upperBound(value, false)
+}
+
+/**
+ * Build a key range between two boundaries.
+ *
+ * @param lower - The lower boundary
+ * @param upper - The upper boundary
+ * @param lowerOpen - Whether to exclude the lower boundary
+ * @param upperOpen - Whether to exclude the upper boundary
+ * @returns The bounded key range
+ */
+export function rangeBetweenKeys(
+	lower: IDBValidKey,
+	upper: IDBValidKey,
+	lowerOpen = false,
+	upperOpen = false,
+): IDBKeyRange {
+	return IDBKeyRange.bound(lower, upper, lowerOpen, upperOpen)
+}
+
+/**
+ * Build a key range containing every string with one prefix.
+ *
+ * @param value - The required string prefix
+ * @returns A closed range spanning every matching string
+ */
+export function rangePrefix(value: string): IDBKeyRange {
+	// U+FFFF sorts above any normal code unit, capping the range without excluding the prefix.
+	return IDBKeyRange.bound(value, value + '￿', false, false)
 }
 
 /**

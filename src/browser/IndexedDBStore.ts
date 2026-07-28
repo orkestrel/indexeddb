@@ -31,7 +31,7 @@ import { IndexedDBIndex } from './IndexedDBIndex.js'
  * database's `read` / `write`. The keyed verbs batch by their array overload — and
  * those overloads are declared first, because an array is itself both a record and
  * a compound `IDBValidKey`, so the array signature must take precedence to read as
- * a batch (AGENTS §9.2). Pass `range.only([…])` to `records` / `count` to act on a
+ * a batch (AGENTS §9.2). Pass `rangeExactKey([…])` to `records` / `count` to act on a
  * single compound key.
  */
 export class IndexedDBStore implements IndexedDBStoreInterface {

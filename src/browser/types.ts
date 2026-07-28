@@ -276,7 +276,7 @@ export interface IndexedDBIndexInterface {
  * `remove` deletes; `clear` empties the store. The keyed verbs batch by their
  * array overload — listed first, since an array is itself a valid record and a
  * compound `IDBValidKey`, so the array signature must win (AGENTS §9.2). To act on
- * a single **compound** key, pass `range.only([…])` to `records` / `count`.
+ * a single **compound** key, pass `rangeExactKey([…])` to `records` / `count`.
  */
 export interface IndexedDBStoreInterface {
 	readonly name: string

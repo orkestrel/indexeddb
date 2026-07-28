@@ -40,6 +40,57 @@ const resolve = {
 	}, {}),
 }
 
+export function gateBrowserProjects(
+	registrations: readonly {
+		readonly project: () => UserConfig
+		readonly browser?: string
+	}[],
+	available: boolean,
+	argv: readonly string[],
+): NonNullable<UserConfig['test']> {
+	const projects: UserConfig[] = []
+	const gated: string[] = []
+	for (const registration of registrations) {
+		if (registration.browser !== undefined && !available) {
+			gated.push(registration.browser)
+			projects.push({
+				resolve,
+				test: {
+					name: { label: registration.browser, color: 'yellow' },
+					include: [],
+					environment: 'node',
+					browser: { enabled: false },
+				},
+			})
+			continue
+		}
+		projects.push(registration.project())
+	}
+	if (gated.length === 0) return { projects }
+	console.warn(`browser projects skipped: Chromium absent (${gated.join(', ')})`)
+	const filters: string[] = []
+	let readable = true
+	for (let index = 0; index < argv.length; index += 1) {
+		const argument = argv[index]
+		if (argument === '--project') {
+			const filter = argv[index + 1]
+			if (filter === undefined) {
+				readable = false
+				continue
+			}
+			filters.push(filter)
+			index += 1
+			continue
+		}
+		if (argument?.startsWith('--project=') === true) {
+			filters.push(argument.slice('--project='.length))
+		}
+	}
+	return readable && filters.length > 0 && filters.every((filter) => gated.includes(filter))
+		? { passWithNoTests: true, projects }
+		: { projects }
+}
+
 export const ENVIRONMENT_CSS = Object.freeze({
 	transformer: 'lightningcss',
 	lightningcss: {
@@ -867,7 +918,6 @@ export function environmentBoundary(
 	}
 }
 
-if (!hasChromium) console.warn('browser projects skipped: Chromium absent (src:browser)')
 export const srcBrowser = (config?: UserConfig): UserConfig =>
 	mergeConfig(
 		{
@@ -892,11 +942,10 @@ export const srcBrowser = (config?: UserConfig): UserConfig =>
 			},
 			test: {
 				name: { label: 'src:browser', color: 'yellow' },
-				include: hasChromium ? ['tests/src/browser/**/*.test.ts'] : [],
-				passWithNoTests: !hasChromium,
+				include: ['tests/src/browser/**/*.test.ts'],
 				setupFiles: ['./tests/setup.ts', './tests/setupBrowser.ts'],
 				browser: {
-					enabled: hasChromium,
+					enabled: true,
 					provider: playwright(),
 					instances: [{ browser: 'chromium', headless: true }],
 				},
@@ -939,7 +988,9 @@ export const guides = (config?: UserConfig): UserConfig =>
 
 export default defineConfig({
 	resolve,
-	test: {
-		projects: [...(hasChromium ? [srcBrowser] : []), policy, guides],
-	},
+	test: gateBrowserProjects(
+		[{ project: srcBrowser, browser: 'src:browser' }, { project: policy }, { project: guides }],
+		hasChromium,
+		process.argv,
+	),
 })

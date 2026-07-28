@@ -127,49 +127,50 @@ plan.artifacts.some((artifact) => artifact.path === 'app/server/main.ts') // tru
 
 From [`types.ts`](../../src/core/types.ts).
 
-| Name                   | Kind      |
-| ---------------------- | --------- |
-| `Environment`          | type      |
-| `BuildFormat`          | type      |
-| `SrcDefinition`        | interface |
-| `AppDefinition`        | interface |
-| `ViteMachinery`        | interface |
-| `Origin`               | type      |
-| `Group`                | type      |
-| `Category`             | type      |
-| `CatalogEntry`         | interface |
-| `Drift`                | type      |
-| `Freshness`            | type      |
-| `CompileStage`         | type      |
-| `ScaffoldErrorCode`    | type      |
-| `Dependency`           | interface |
-| `Override`             | interface |
-| `Blueprint`            | interface |
-| `Member`               | interface |
-| `ArtifactBase`         | interface |
-| `HostArtifact`         | interface |
-| `ContentArtifact`      | interface |
-| `Artifact`             | type      |
-| `Snapshot`             | type      |
-| `Plan`                 | interface |
-| `Finding`              | interface |
-| `Audit`                | interface |
-| `Question`             | interface |
-| `Validation`           | interface |
-| `GuideSync`            | interface |
-| `VersionSync`          | interface |
-| `SyncReport`           | interface |
-| `PlanSummary`          | interface |
-| `CompileRecord`        | interface |
-| `CompileFailure`       | interface |
-| `Scaffolding`          | interface |
-| `PlanRecord`           | interface |
-| `CompilerEventMap`     | type      |
-| `CompilerOptions`      | interface |
-| `CompilerInterface`    | interface |
-| `PlanManagerEventMap`  | type      |
-| `PlanManagerOptions`   | interface |
-| `PlanManagerInterface` | interface |
+| Name                      | Kind      |
+| ------------------------- | --------- |
+| `Environment`             | type      |
+| `BuildFormat`             | type      |
+| `SrcDefinition`           | interface |
+| `AppDefinition`           | interface |
+| `ViteMachinery`           | interface |
+| `ViteProjectRegistration` | interface |
+| `Origin`                  | type      |
+| `Group`                   | type      |
+| `Category`                | type      |
+| `CatalogEntry`            | interface |
+| `Drift`                   | type      |
+| `Freshness`               | type      |
+| `CompileStage`            | type      |
+| `ScaffoldErrorCode`       | type      |
+| `Dependency`              | interface |
+| `Override`                | interface |
+| `Blueprint`               | interface |
+| `Member`                  | interface |
+| `ArtifactBase`            | interface |
+| `HostArtifact`            | interface |
+| `ContentArtifact`         | interface |
+| `Artifact`                | type      |
+| `Snapshot`                | type      |
+| `Plan`                    | interface |
+| `Finding`                 | interface |
+| `Audit`                   | interface |
+| `Question`                | interface |
+| `Validation`              | interface |
+| `GuideSync`               | interface |
+| `VersionSync`             | interface |
+| `SyncReport`              | interface |
+| `PlanSummary`             | interface |
+| `CompileRecord`           | interface |
+| `CompileFailure`          | interface |
+| `Scaffolding`             | interface |
+| `PlanRecord`              | interface |
+| `CompilerEventMap`        | type      |
+| `CompilerOptions`         | interface |
+| `CompilerInterface`       | interface |
+| `PlanManagerEventMap`     | type      |
+| `PlanManagerOptions`      | interface |
+| `PlanManagerInterface`    | interface |
 
 The closed vocabularies are small and total. `Environment` is `'core' | 'browser' | 'server'`.
 `BuildFormat` is `'es' | 'cjs'`. `Origin` is `'host' | 'template' | 'computed'`. `Group` is
@@ -189,6 +190,10 @@ carry: `browser` for the CSS pipeline and the Playwright-backed browser test pro
 single-file-component, HTML, and development-server machinery an application browser environment
 needs, and `output` for build-output containment. It never selects a boundary guarantee — those ship
 in every shape, as the compilers section sets out.
+
+`ViteProjectRegistration` carries one generated project factory identifier and its optional browser
+label. Root configuration renderers preserve that browser ownership as data through registration
+instead of inferring it from a project identifier.
 
 `Blueprint` is the closed input spec:
 
@@ -969,6 +974,7 @@ From [`compilers.ts`](../../src/core/compilers.ts).
 | `packageManifest`       | function |
 | `rootTsconfig`          | function |
 | `viteMachinery`         | function |
+| `renderViteTest`        | function |
 | `viteHeader`            | function |
 | `policyViteProject`     | function |
 | `singleSrcViteConfig`   | function |
@@ -1040,6 +1046,10 @@ along the three `ViteMachinery` axes:
 
 An application of `app/core` alone is the sole shape that builds nothing, so it is the sole shape
 without output containment — and it still carries every boundary guarantee above.
+
+`renderViteTest` is the single root-project renderer. It consumes ordered
+`ViteProjectRegistration` data and emits either the plain project list or the browser gate, keeping
+source and application root configurations byte-consistent without reconstructing browser ownership.
 
 `coreViteConfig`, `srcViteConfig`, and `appViteConfig` emit the thin per-target wrappers;
 `rootViteConfig`, `singleSrcViteConfig`, and `applicationViteConfig` emit the root configuration for
@@ -1397,13 +1407,17 @@ a fixed, interleaved order so aggregates sit immediately before their per-enviro
   Vue typechecker, every other scope uses plain `tsc`
 - `test`, then `test:src` and its per-environment scopes, `test:app` and its per-environment scopes,
   `test:policy`, and `test:guides`; an engine also receives the deliberately non-default
-  `test:integration` live installed-consumer gate
+  `test:integration` live installed-consumer gate and `test:equivalence` driver-reference proof
 - `build`, then `build:src` and its per-environment targets, `build:app` and its runtime targets, and
   `build:host` for an engine workspace
 - `dev` when a browser application is selected; `serve` and `serve:build` when a server application
   is selected
 - `prepublishOnly` chaining `format:check → lint:check → check → build → test`, followed by the
   live generated-consumer integration gate for the scaffold engine itself
+
+Run `npm run test:equivalence` after changing the persistent boundary build driver. It reruns the
+integration project in dual-path mode and proves each programmatic driver verdict against the
+spawned npm-script reference; ordinary integration runs keep the faster driver-only path.
 
 **Environment isolation.** Scoped TypeScript projects remove the wrong host's globals from each
 environment: core scopes carry the WHATWG web-interop surface and no host at all — no DOM, no Node,
@@ -1548,11 +1562,12 @@ configuration and the generated policy test both probe `existsSync(chromium.exec
 browser suite runs when a real Chromium is installed and is skipped honestly when it is not, rather
 than being faked. The gate is applied at registration, not inside the real browser project: without
 Chromium, each browser factory is replaced by a same-label Node/no-test placeholder, so generated
-`--project` filters still resolve while no browser code runs. The root permits an empty run only
-when every exact project filter names one of those gated placeholders; a mixed filter keeps the
-ordinary no-test failure semantics for its Node projects. One printed warning names every gated
-project label. A machine with a browser registers and runs the real browser suites unchanged; a
-machine without one runs the remaining projects and says so.
+`--project <label>` and `--project=<label>` filters still resolve while no browser code runs. The
+root permits an empty run only when every recognized exact project filter names one of those gated
+placeholders; an unreadable or mixed filter keeps the ordinary no-test failure semantics for its
+Node projects. One printed warning names every gated project label. A machine with a browser
+registers and runs the real browser suites unchanged; a machine without one runs the remaining
+projects and says so.
 
 **Continuous integration.** The generated workflow runs on push and pull request, on
 `ubuntu-latest`, with read-only contents permission, a 60-minute timeout, and a matrix that **tests
@@ -2008,6 +2023,7 @@ import {
 	coreTsconfig,
 	coreViteConfig,
 	policyViteProject,
+	renderViteTest,
 	rootTsconfig,
 	rootViteConfig,
 	singleSrcViteConfig,
@@ -2024,6 +2040,7 @@ appTsconfig('browser', true)
 
 viteMachinery(['core']) // { browser: false, vue: false, output: true }
 viteMachinery([], ['core', 'browser']) // { browser: true, vue: true, output: true }
+renderViteTest([{ project: 'srcCore' }], false).includes('projects: [srcCore]') // true
 viteHeader(viteMachinery([], ['core', 'browser'])) // the shared header, with browser and Vue support
 coreViteConfig()
 srcViteConfig('browser')

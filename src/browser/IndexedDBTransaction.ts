@@ -28,17 +28,13 @@ export class IndexedDBTransaction<
 	constructor(transaction: IDBTransaction) {
 		this.#transaction = transaction
 		this.#stores = Array.from(transaction.objectStoreNames)
-		const settle = (): void => {
-			this.#active = false
-			this.#finished = true
-		}
 		// `addEventListener` rather than the `on*` slots: `#run` also awaits this
 		// same native transaction through `promisifyTransaction`, which listens the
 		// same way — assigning `on*` here would clobber whichever handler is wired
 		// second.
-		transaction.addEventListener('complete', settle)
-		transaction.addEventListener('abort', settle)
-		transaction.addEventListener('error', settle)
+		transaction.addEventListener('complete', this.#settle.bind(this))
+		transaction.addEventListener('abort', this.#settle.bind(this))
+		transaction.addEventListener('error', this.#settle.bind(this))
 	}
 
 	get transaction(): IDBTransaction {
@@ -99,5 +95,10 @@ export class IndexedDBTransaction<
 			throw new IndexedDBError('INACTIVE', 'Cannot commit an already-finished transaction')
 		}
 		guardSync(() => this.#transaction.commit())
+	}
+
+	#settle(): void {
+		this.#active = false
+		this.#finished = true
 	}
 }

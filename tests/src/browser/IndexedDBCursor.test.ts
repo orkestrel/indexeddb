@@ -1,4 +1,4 @@
-import { IndexedDBError, range } from '@src/browser'
+import { IndexedDBError, rangeFromKey } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
 	createCleanups,
@@ -170,7 +170,7 @@ describe('IndexedDBCursor — in-place mutation', () => {
 describe('IndexedDBCursor — ranges', () => {
 	it('honours the cursor query range', async () => {
 		const db = await seed()
-		const seen = await drainCursor(await db.store('users').cursor({ query: range.from('b') }))
+		const seen = await drainCursor(await db.store('users').cursor({ query: rangeFromKey('b') }))
 		expect(seen.map((step) => step.value.id)).toEqual(['b', 'c'])
 	})
 })

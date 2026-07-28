@@ -6,7 +6,13 @@ import {
 	isIndexedDBSupported,
 	promisifyRequest,
 	promisifyTransaction,
-	range,
+	rangeAboveKey,
+	rangeBelowKey,
+	rangeBetweenKeys,
+	rangeExactKey,
+	rangeFromKey,
+	rangePrefix,
+	rangeToKey,
 	readRecord,
 	readRecords,
 	wrapError,
@@ -22,7 +28,7 @@ import {
 
 // The browser surface's helpers (`src/browser/helpers.ts`), exercised in real
 // Chromium: the feature probe `isIndexedDBSupported` (the entry gate a consumer
-// runs before entering the rest of this module), the `range` key-range builders
+// runs before entering the rest of this module), the key-range builders
 // asserted on the `IDBKeyRange` bounds they return, the shared read primitives
 // (`readRecord` / `readRecords` / `hasKey`) over a real `IDBObjectStore` /
 // `IDBIndex` reached through a transaction scope — including the `isRecord`
@@ -47,9 +53,9 @@ const cleanups = createCleanups()
 
 afterEach(cleanups.run)
 
-describe('range — key-range builders', () => {
+describe('key-range builders', () => {
 	it('only is a single-value, fully-closed bound', () => {
-		const only = range.only(5)
+		const only = rangeExactKey(5)
 		expect(only.lower).toBe(5)
 		expect(only.upper).toBe(5)
 		expect(only.lowerOpen).toBe(false)
@@ -59,35 +65,35 @@ describe('range — key-range builders', () => {
 	})
 
 	it('above / from are lower bounds (exclusive / inclusive)', () => {
-		const above = range.above(10)
+		const above = rangeAboveKey(10)
 		expect(above.lower).toBe(10)
 		expect(above.lowerOpen).toBe(true)
 		expect(above.upper).toBeUndefined()
 		expect(above.includes(10)).toBe(false)
 		expect(above.includes(11)).toBe(true)
 
-		const from = range.from(10)
+		const from = rangeFromKey(10)
 		expect(from.lower).toBe(10)
 		expect(from.lowerOpen).toBe(false)
 		expect(from.includes(10)).toBe(true)
 	})
 
 	it('below / to are upper bounds (exclusive / inclusive)', () => {
-		const below = range.below(10)
+		const below = rangeBelowKey(10)
 		expect(below.upper).toBe(10)
 		expect(below.upperOpen).toBe(true)
 		expect(below.lower).toBeUndefined()
 		expect(below.includes(10)).toBe(false)
 		expect(below.includes(9)).toBe(true)
 
-		const to = range.to(10)
+		const to = rangeToKey(10)
 		expect(to.upper).toBe(10)
 		expect(to.upperOpen).toBe(false)
 		expect(to.includes(10)).toBe(true)
 	})
 
 	it('between is a closed range by default, with optional open ends', () => {
-		const closed = range.between(1, 5)
+		const closed = rangeBetweenKeys(1, 5)
 		expect(closed.lower).toBe(1)
 		expect(closed.upper).toBe(5)
 		expect(closed.lowerOpen).toBe(false)
@@ -95,7 +101,7 @@ describe('range — key-range builders', () => {
 		expect(closed.includes(1)).toBe(true)
 		expect(closed.includes(5)).toBe(true)
 
-		const open = range.between(1, 5, { lowerOpen: true, upperOpen: true })
+		const open = rangeBetweenKeys(1, 5, true, true)
 		expect(open.lowerOpen).toBe(true)
 		expect(open.upperOpen).toBe(true)
 		expect(open.includes(1)).toBe(false)
@@ -104,7 +110,7 @@ describe('range — key-range builders', () => {
 	})
 
 	it('prefix bounds every string with the prefix', () => {
-		const prefix = range.prefix('user:')
+		const prefix = rangePrefix('user:')
 		expect(prefix.lower).toBe('user:')
 		expect(prefix.lowerOpen).toBe(false)
 		expect(prefix.upperOpen).toBe(false)
@@ -146,7 +152,7 @@ describe('readRecord / readRecords / hasKey — over a real store', () => {
 			const native = tx.store('store').store
 			expect(await readRecords(native)).toEqual([{ id: 'a' }, { id: 'c' }])
 			expect(await readRecords(native, undefined, 1)).toEqual([{ id: 'a' }])
-			expect(await readRecords(native, range.from('c'))).toEqual([{ id: 'c' }])
+			expect(await readRecords(native, rangeFromKey('c'))).toEqual([{ id: 'c' }])
 		})
 	})
 

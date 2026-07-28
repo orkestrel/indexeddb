@@ -1,4 +1,4 @@
-import { createIndexedDBDatabase, range } from '@src/browser'
+import { createIndexedDBDatabase, rangeFromKey } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createCleanups, deleteDatabase, uniqueName } from '../../setupBrowser.js'
 
@@ -39,7 +39,7 @@ describe('createIndexedDBDatabase', () => {
 		expect(db.open).toBe(true)
 		expect(await db.store('users').get('u1')).toEqual({ id: 'u1', name: 'Ada', age: 36 })
 		expect(
-			(await db.store('users').index('byAge').records(range.from(40))).map((r) => r.id),
+			(await db.store('users').index('byAge').records(rangeFromKey(40))).map((r) => r.id),
 		).toEqual(['u2'])
 	})
 

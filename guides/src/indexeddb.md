@@ -5,7 +5,7 @@
 ## Surface
 
 ```ts
-import { createIndexedDBDatabase, range } from '@orkestrel/indexeddb'
+import { createIndexedDBDatabase, rangeFromKey } from '@orkestrel/indexeddb'
 
 // A store keyed by `id`, with one secondary index on `age`. `version: 1` creates
 // the schema on first open; omit `version` for auto-managed mode (see below).
@@ -25,7 +25,7 @@ await users.set([
 ]) // array in → array of keys out (array-first batch)
 
 await users.get('u1') // point read by primary key → the row, or undefined
-await users.index('byAge').records(range.from(18)) // adults, index-backed (O(log n))
+await users.index('byAge').records(rangeFromKey(18)) // adults, index-backed (O(log n))
 ```
 
 ### Database and factory
@@ -57,7 +57,13 @@ await users.index('byAge').records(range.from(18)) // adults, index-backed (O(lo
 | `hasKey`               | function | Whether a key is present in a store or index (a native `count` > 0).                                |
 | `createIndex`          | function | Create a secondary index on a store from its `IndexDefinition` (the shared index-DDL leaf).         |
 | `guardSync`            | function | Run a synchronous native IndexedDB call, wrapping a thrown `DOMException` into an `IndexedDBError`. |
-| `range`                | const    | Key-range builders (`only` / `above` / `from` / `below` / `to` / `between` / `prefix`).             |
+| `rangeExactKey`        | function | Build a key range matching exactly one key.                                                         |
+| `rangeAboveKey`        | function | Build a key range strictly above one key.                                                           |
+| `rangeFromKey`         | function | Build a key range starting at and including one key.                                                |
+| `rangeBelowKey`        | function | Build a key range strictly below one key.                                                           |
+| `rangeToKey`           | function | Build a key range ending at and including one key.                                                  |
+| `rangeBetweenKeys`     | function | Build a bounded key range with independently open boundaries.                                       |
+| `rangePrefix`          | function | Build a key range containing every string with one prefix.                                          |
 | `wrapError`            | function | Map a native IndexedDB `DOMException` to a typed `IndexedDBError` (the request boundary).           |
 | `IndexedDBError`       | class    | A wrapper error carrying a machine-readable `code` mapped from the native fault.                    |
 | `isIndexedDBError`     | function | Whether a value is an `IndexedDBError`.                                                             |
@@ -190,10 +196,10 @@ The transaction-bound CRUD surface — the same verbs as a store, without `index
 These invariants hold across `src/browser/indexeddb` ↔ `indexeddb.md`:
 
 1. **DOC ↔ SOURCE bijection.** Every row in the `## Surface` tables is a real export of the wrapper, and every export appears as a Surface row — exhaustive, both directions (AGENTS §22).
-2. **Native, not a query engine.** The wrapper exposes only what raw IndexedDB offers natively — object stores, secondary indexes, key ranges (`range`), cursors, and multi-store transactions. It has **no** `where` / `filter` / `order` / aggregate builder; that stays out of scope entirely, deliberately, so the wrapper never grows into a second query DSL.
+2. **Native, not a query engine.** The wrapper exposes only what raw IndexedDB offers natively — object stores, secondary indexes, key-range helpers, cursors, and multi-store transactions. It has **no** `where` / `filter` / `order` / aggregate builder; that stays out of scope entirely, deliberately, so the wrapper never grows into a second query DSL.
 3. **`Row` values, `IDBValidKey` keys.** Reads return this package's own `Row` (narrowed with `isRecord`, never an unchecked cast); writes take a `Row`. Keys are the native `IDBValidKey`.
 4. **In-line or out-of-line keys.** A store with a `path` keys rows by that field; a store with no `path` is out-of-line and takes an explicit key on `set` / `add` (`set(row, key)`).
-5. **Batch by the array overload, array-first.** `get` / `resolve` / `has` / `remove` / `set` / `add` take one value for one result or an array for an array of results (AGENTS §9.2). The array overload is declared first because an array is itself both a record and a compound `IDBValidKey`; to act on a single compound key, pass `range.only([…])` to `records` / `count`.
+5. **Batch by the array overload, array-first.** `get` / `resolve` / `has` / `remove` / `set` / `add` take one value for one result or an array for an array of results (AGENTS §9.2). The array overload is declared first because an array is itself both a record and a compound `IDBValidKey`; to act on a single compound key, pass `rangeExactKey([…])` to `records` / `count`.
 6. **Each standalone call is its own transaction; `read` / `write` are atomic.** A store method opens and commits its own implicit transaction; `db.read` / `db.write` run a scope across stores that commits on resolve and rolls back on a throw. The completion listener is attached BEFORE the scope runs (not after it resolves), so a scope whose last step is a non-IDB `await` — letting the native transaction auto-commit while the scope is still on the stack — still settles `read` / `write` instead of hanging: `complete` can otherwise fire before a listener attached only after the scope returns would ever be wired.
 7. **`get` / `records` narrow to records; `count` / `has` / `keys` operate on keys.** A store or index counts, tests presence, and lists keys over every stored value regardless of shape, but `get` / `resolve` / `records` narrow each value with `isRecord` — so a store holding a non-record value shows `count` greater than `records().length`, and `has` reads `true` for a key `get` reads back as `undefined` (a miss AND a non-record value both read as `undefined` from `get`). A cursor's `value` cannot be `undefined` (`Row` is non-optional there), so it masks a non-record value to `{}` instead — see the cursor pattern below.
 8. **DOC ↔ SOURCE method bijection.** Every method in a `## Methods` table is a real call-signature member of that interface in source, and every public method of each behavioral interface is documented — exhaustive, both directions; and each implementing class exposes exactly its interface's public methods, no more (AGENTS §22).
@@ -214,11 +220,25 @@ if (isIndexedDBSupported()) {
 ### Index-backed reads with key ranges
 
 ```ts
+import {
+	rangeAboveKey,
+	rangeBelowKey,
+	rangeBetweenKeys,
+	rangeExactKey,
+	rangeFromKey,
+	rangePrefix,
+	rangeToKey,
+} from '@orkestrel/indexeddb'
+
 const users = db.store('users')
-await users.index('byAge').records(range.between(18, 65)) // working-age, O(log n)
-await users.index('byAge').count(range.from(18)) // how many adults
+await users.records(rangeExactKey('user:1')) // exactly one primary key
+await users.records(rangeAboveKey('user:1')) // keys greater than user:1
+await users.records(rangeBelowKey('user:9')) // keys less than user:9
+await users.records(rangeToKey('user:9')) // keys less than or equal to user:9
+await users.index('byAge').records(rangeBetweenKeys(18, 65)) // working-age, O(log n)
+await users.index('byAge').count(rangeFromKey(18)) // how many adults
 await users.index('byEmail').get('ada@x.io') // unique-index point lookup
-await users.records(range.prefix('user:')) // primary-key prefix scan
+await users.records(rangePrefix('user:')) // primary-key prefix scan
 ```
 
 ### Cursor streaming and in-place mutation
@@ -368,7 +388,7 @@ await db.connect()
 - **Feature-detect with `isIndexedDBSupported`** before opening a database in an environment that may lack storage (a non-browser runtime, a privacy mode).
 - **Declare a `path`** for ordinary stores (in-line keys); omit it only when you mean to pass keys explicitly (out-of-line).
 - **Keep transaction scopes to awaited IndexedDB operations** — an unrelated `await` between steps lets the transaction auto-commit (see the auto-commit rule above).
-- **Reach for `range`** instead of reading everything and filtering in JS; an index plus a key range is the wrapper's whole point.
+- **Reach for the key-range helpers** instead of reading everything and filtering in JS; an index plus a key range is the wrapper's whole point.
 - **A live connection yields to another tab's upgrade, and recovers from an abnormal close.** The database wires the native `onversionchange` event to close itself, so a second tab (or a second `IndexedDBDatabaseInterface` in the same page) opening at a higher version is never blocked indefinitely. Because that `close()` is self-initiated, the native `close` event does NOT fire for it — so the `onversionchange` handler also clears its own latches directly. The native `onclose` event — fired for an ABNORMAL, browser-initiated close (a crashed connection, storage eviction) that this handle did not request — clears the SAME latches, so either path leaves the handle able to lazily reconnect on its next operation rather than failing `NOT_OPEN` (or a stale, dead connection) forever. Without this, two open tabs over the same database can hang forever, and an abnormal close would permanently wedge the handle.
 - **Storage persistence is app policy, not this wrapper's job.** Whether the browser is allowed to evict a database under storage pressure (`navigator.storage.persist()`) is a call the consuming application makes — this wrapper does not surface a `durability` option or any persistence API; it stays strictly on the raw IndexedDB CRUD/schema surface.
 - **Safari quirks — untested here, Chromium-only CI.** This package's test suite runs against real Chromium only. Safari has historically shipped `getAll` bugs and first-transaction-after-upgrade quirks on some versions; if you must support Safari, verify your exact schema and upgrade path there directly rather than assuming Chromium parity.
@@ -376,7 +396,7 @@ await db.connect()
 ## Tests
 
 - [`tests/guides/src/parity.test.ts`](../../tests/guides/src/parity.test.ts) — the `## Surface` ↔ `src/browser` bijection.
-- [`tests/src/browser/helpers.test.ts`](../../tests/src/browser/helpers.test.ts) — the `isIndexedDBSupported` probe, the `range` key-range builders, the shared read primitives (`readRecord` / `readRecords` / `hasKey`) over a real store / index (including the non-record `isRecord` boundary), `createIndex` translating an `IndexDefinition` into a native `createIndex` call inside a real `onupgradeneeded` (honouring `unique` / `multiple`), the `promisifyRequest` / `promisifyTransaction` bridges (success + `IndexedDBError` rejection), `guardSync` wrapping a thrown `DOMException`, `wrapError` (including `INACTIVE` / `INVALID`), and `isIndexedDBError`.
+- [`tests/src/browser/helpers.test.ts`](../../tests/src/browser/helpers.test.ts) — the `isIndexedDBSupported` probe, the seven key-range helpers, the shared read primitives (`readRecord` / `readRecords` / `hasKey`) over a real store / index (including the non-record `isRecord` boundary), `createIndex` translating an `IndexDefinition` into a native `createIndex` call inside a real `onupgradeneeded` (honouring `unique` / `multiple`), the `promisifyRequest` / `promisifyTransaction` bridges (success + `IndexedDBError` rejection), `guardSync` wrapping a thrown `DOMException`, `wrapError` (including `INACTIVE` / `INVALID`), and `isIndexedDBError`.
 - [`tests/src/browser/IndexedDBDatabase.test.ts`](../../tests/src/browser/IndexedDBDatabase.test.ts) — the database handle in real Chromium: lazy connect and state, the `store` accessor, atomic `read` / `write` scopes (including settling when the scope ends on a trailing non-IDB `await`, the auto-commit race), `close` / `drop`, the auto-managed schema path, persistence across reopen, the `upgrade` hook (dropping a store, indexing an existing store and a same-upgrade `context.create`d store via `context.index` — honouring `unique` / `multiple` — removing an index via `context.deindex`, data migration, `context.create`, `old` / `version` / `stores`, an async `upgrade` rejection cleanly failing `connect()` with `UPGRADE`, and a synchronous `guardSync` fault from `context.drop` / `context.deindex` targeting a missing store/index likewise failing `connect()` with `UPGRADE`), a live connection yielding to a second connection's `versionchange`, that yielded handle lazily reconnecting at the new version on its next operation, and an ABNORMAL (non-self-initiated) `onclose` likewise leaving the handle able to lazily reconnect instead of staying invalid forever.
 - [`tests/src/browser/IndexedDBStore.test.ts`](../../tests/src/browser/IndexedDBStore.test.ts) — the store reached through `db.store(name)`: metadata getters, the keyed CRUD surface with array-first batch overloads, key-range reads, `index` / `cursor` access, and the `NOT_FOUND` / `CONSTRAINT` / `DATA` (a non-cloneable value) faults.
 - [`tests/src/browser/IndexedDBIndex.test.ts`](../../tests/src/browser/IndexedDBIndex.test.ts) — the index reached through `store.index(name)`: metadata getters, the read surface (`get` / `resolve` / `records` / `keys` / `primary` / `has` / `count` / `cursor`), the unique-index lookup + constraint, and the `multiple` (multiEntry) array index.

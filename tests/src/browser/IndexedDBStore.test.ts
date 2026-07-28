@@ -1,4 +1,4 @@
-import { IndexedDBError, range } from '@src/browser'
+import { IndexedDBError, rangeExactKey, rangeFromKey, rangePrefix } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import { captureError } from '../../setup.js'
 import { createCleanups, createTestDatabase, drainCursor, errorCode } from '../../setupBrowser.js'
@@ -168,7 +168,7 @@ describe('IndexedDBStore — key strategies', () => {
 		expect(await log.keys()).toEqual([1, 2])
 	})
 
-	it('reads a single compound key via range.only', async () => {
+	it('reads a single compound key via rangeExactKey', async () => {
 		const { db, cleanup } = await createTestDatabase({ parts: { path: ['make', 'model'] } })
 		cleanups.push(cleanup)
 		const parts = db.store('parts')
@@ -176,10 +176,10 @@ describe('IndexedDBStore — key strategies', () => {
 			{ make: 'acme', model: 'a', stock: 1 },
 			{ make: 'acme', model: 'b', stock: 2 },
 		])
-		expect(await parts.records(range.only(['acme', 'b']))).toEqual([
+		expect(await parts.records(rangeExactKey(['acme', 'b']))).toEqual([
 			{ make: 'acme', model: 'b', stock: 2 },
 		])
-		expect(await parts.count(range.only(['acme', 'b']))).toBe(1)
+		expect(await parts.count(rangeExactKey(['acme', 'b']))).toBe(1)
 	})
 })
 
@@ -189,12 +189,12 @@ describe('IndexedDBStore — key-range reads', () => {
 		cleanups.push(cleanup)
 		const users = db.store('users')
 		await users.set([{ id: 'user:1' }, { id: 'user:2' }, { id: 'zzz' }])
-		expect((await users.records(range.prefix('user:'))).map((row) => row.id)).toEqual([
+		expect((await users.records(rangePrefix('user:'))).map((row) => row.id)).toEqual([
 			'user:1',
 			'user:2',
 		])
-		expect(await users.count(range.prefix('user:'))).toBe(2)
-		expect(await users.keys(range.from('user:2'))).toEqual(['user:2', 'zzz'])
+		expect(await users.count(rangePrefix('user:'))).toBe(2)
+		expect(await users.keys(rangeFromKey('user:2'))).toEqual(['user:2', 'zzz'])
 	})
 })
 

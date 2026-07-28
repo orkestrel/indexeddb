@@ -16,7 +16,7 @@ import { IndexedDBDatabase } from './IndexedDBDatabase.js'
  *
  * @example
  * ```ts
- * import { createIndexedDBDatabase, range } from '@orkestrel/indexeddb'
+ * import { createIndexedDBDatabase, rangeFromKey } from '@orkestrel/indexeddb'
  *
  * const db = createIndexedDBDatabase({
  * 	name: 'app',
@@ -26,7 +26,7 @@ import { IndexedDBDatabase } from './IndexedDBDatabase.js'
  * 	},
  * })
  * await db.store('users').set({ id: 'u1', name: 'Ada', age: 36 })
- * await db.store('users').index('byAge').records(range.from(18)) // adults, index-backed
+ * await db.store('users').index('byAge').records(rangeFromKey(18)) // adults, index-backed
  * ```
  */
 export function createIndexedDBDatabase<const Stores extends StoresShape>(
