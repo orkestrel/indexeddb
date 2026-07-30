@@ -31,12 +31,11 @@ export type Row = Record<string, unknown>
  * Each maps from a native `DOMException.name` or a wrapper-lifecycle fault:
  * `NOT_OPEN` (used before `connect`), `CLOSED` (used after `close`), `NOT_FOUND`
  * (a `resolve` miss), `CONSTRAINT` (a unique-key violation), `QUOTA` (storage
- * full), `ABORTED` (a transaction rolled back), `BLOCKED` (an open held up by
- * another live connection), `DATA` (an invalid key or an un-clonable value —
- * native `DataError` and `DataCloneError` both map here), `OPEN` /
- * `UPGRADE` (a failed open or schema upgrade), `INACTIVE` (the transaction went
- * inactive — IndexedDB's auto-commit fault, raised when an operation runs after
- * a non-IDB `await` deactivated its transaction — reachable through
+ * full), `ABORTED` (a transaction rolled back), `DATA` (an invalid key or an
+ * un-clonable value — native `DataError` and `DataCloneError` both map here),
+ * `OPEN` / `UPGRADE` (a failed open or schema upgrade), `INACTIVE` (the
+ * transaction went inactive — IndexedDB's auto-commit fault, raised when an
+ * operation runs after a non-IDB `await` deactivated its transaction — reachable through
  * `IndexedDBTransactionStoreInterface`, and when `IndexedDBTransactionInterface`'s
  * `abort` / `commit` are called on an already-finished transaction), `READONLY`
  * (native `ReadOnlyError` — a write attempted on a `readonly` transaction, e.g.
@@ -54,7 +53,6 @@ export type IndexedDBErrorCode =
 	| 'CONSTRAINT'
 	| 'QUOTA'
 	| 'ABORTED'
-	| 'BLOCKED'
 	| 'DATA'
 	| 'OPEN'
 	| 'UPGRADE'
@@ -181,9 +179,18 @@ export interface IndexedDBUpgradeContext {
  * on any store with `context.index` / `context.deindex`, or migrate data with
  * `context.store(name)`. It may return `void` or a `Promise<void>` — an async
  * `upgrade` may `await` the IDB requests it issues through `context.store(...)`
- * (see the auto-commit rule on {@link IndexedDBUpgradeContext}); a rejection
- * aborts the versionchange transaction and rejects the pending `connect()` with
- * an `IndexedDBError` (code `UPGRADE`) instead of an unhandled rejection.
+ * (see the auto-commit rule on {@link IndexedDBUpgradeContext}). The built-in
+ * pass and custom callback share one failure boundary: a synchronous failure in
+ * either phase, or a custom rejection captured while the versionchange
+ * transaction remains active, aborts the transaction atomically and rejects
+ * `connect()` with an `IndexedDBError` (code `UPGRADE`). Its `cause` is the
+ * initiating value even when that value is `undefined`; a native schema fault
+ * is nested through its typed wrapper (for example, `UPGRADE` → `CONSTRAINT` →
+ * native `ConstraintError`). The same handle may retry after a failed open. If
+ * auto-commit already occurred but the browser reports success after a failure
+ * was recorded, that connection is closed before `connect()` rejects; the
+ * committed schema cannot then be rolled back. A rejection that arrives only
+ * after the open request already succeeded cannot be recovered retroactively.
  */
 export interface IndexedDBDatabaseOptions<Stores extends StoresShape = StoresShape> {
 	readonly name: string
@@ -370,7 +377,11 @@ export interface IndexedDBTransactionInterface<Stores extends StoresShape = Stor
  * store; `read` / `write` run an atomic scope over one or more stores; `close`
  * releases the connection and `drop` deletes the database. `stores` lists the
  * declared (or, once open, the live) store names; `open` reports whether a live
- * connection is held.
+ * connection is held. Native blocked notifications are progress rather than
+ * terminal faults: `connect` / `drop` stay pending until the blocking connection
+ * closes and the native request succeeds or errors. `close` permanently retires
+ * the handle; if an in-flight open later succeeds, its result is closed and that
+ * pending `connect` rejects with `CLOSED`.
  */
 export interface IndexedDBDatabaseInterface<Stores extends StoresShape = StoresShape> {
 	readonly database: IDBDatabase

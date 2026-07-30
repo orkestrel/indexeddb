@@ -23,8 +23,14 @@ import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
  * operation), creating any missing stores from their definitions inside
  * `onupgradeneeded`. `store` reaches a typed store; `read` / `write` run an atomic
  * scope over one or more stores, committing on resolve and rolling back on a throw;
- * `close` releases the connection and `drop` deletes the database. Schema changes
- * beyond creating new stores (dropping stores, altering indexes) are deferred.
+ * `close` releases the connection and `drop` deletes the database. The built-in
+ * schema pass and custom `upgrade` callback share one failure boundary: a fault
+ * captured while the versionchange transaction remains active rolls it back and
+ * rejects `connect()` with `UPGRADE`, retaining its initiating cause. A failure
+ * recorded after auto-commit closes a terminal success connection but cannot
+ * undo the committed schema. Native blocked notifications leave open/delete
+ * requests pending, and `close` permanently rejects any in-flight open after
+ * closing its eventual native result.
  */
 export class IndexedDBDatabase<
 	Stores extends StoresShape = StoresShape,
@@ -139,14 +145,6 @@ export class IndexedDBDatabase<
 					new IndexedDBError('UNKNOWN', `Failed to delete database '${this.#name}'`, request.error),
 				),
 			)
-			request.addEventListener('blocked', () =>
-				reject(
-					new IndexedDBError(
-						'BLOCKED',
-						`Deletion of '${this.#name}' is blocked by another connection`,
-					),
-				),
-			)
 		})
 	}
 
@@ -189,20 +187,20 @@ export class IndexedDBDatabase<
 	// version) — at the database's current version, bumping once to create any
 	// declared store the stored schema is missing.
 	async #open(): Promise<IDBDatabase> {
-		let database = await this.#request(this.#version)
+		let database = this.#accept(await this.#request(this.#version))
 		if (this.#version === undefined) {
 			const missing = this.#missing(database)
 			if (missing.length > 0) {
 				const next = database.version + 1
 				database.close()
-				database = await this.#request(next)
+				database = this.#accept(await this.#request(next))
 			}
 		}
 		// An abnormal, browser-initiated close (a crashed extension, storage
 		// eviction) fires this event — clear BOTH latches, mirroring
 		// `onversionchange` below, so a later operation lazily reconnects instead
 		// of finding a stale resolved `#opening` for a connection that is now dead.
-		database.onclose = this.#clearConnection.bind(this)
+		database.onclose = this.#clearConnection.bind(this, database)
 		// Yield to another context's version-change upgrade instead of blocking it
 		// indefinitely — without this, two tabs over the same database hang: the
 		// second tab's `open` sits in `onblocked` forever because this connection
@@ -216,70 +214,89 @@ export class IndexedDBDatabase<
 		return database
 	}
 
+	#accept(database: IDBDatabase): IDBDatabase {
+		if (this.#closed) {
+			database.close()
+			throw new IndexedDBError('CLOSED', `Database '${this.#name}' has been closed`)
+		}
+		return database
+	}
+
 	// One `indexedDB.open`, creating any missing declared store in `onupgradeneeded`.
 	#request(version: number | undefined): Promise<IDBDatabase> {
 		return new Promise((resolve, reject) => {
-			// Set when `options.upgrade` returns a Promise that rejects — captured
-			// here rather than left as a dangling, unhandled rejection, and routed
-			// into `onerror` below: the failed upgrade aborts its versionchange
-			// transaction, which fails this very open request.
-			let upgradeError: unknown
+			// Presence is separate from the cause value because JavaScript permits
+			// both `throw undefined` and `Promise.reject(undefined)`.
+			let upgradeFailure: { readonly cause: unknown } | undefined
 			const request =
 				version === undefined
 					? globalThis.indexedDB.open(this.#name)
 					: globalThis.indexedDB.open(this.#name, version)
 			request.addEventListener('upgradeneeded', (event) => {
 				const database = request.result
-				for (const [name, definition] of Object.entries(this.#stores)) {
-					if (!database.objectStoreNames.contains(name)) {
-						this.#createStore(database, name, definition)
+				const transaction = request.transaction
+				if (transaction === null) {
+					upgradeFailure = {
+						cause: new IndexedDBError(
+							'UPGRADE',
+							`Upgrade of '${this.#name}' has no versionchange transaction`,
+						),
 					}
+					return
 				}
-				if (this.#upgrade !== undefined) {
-					const transaction = request.transaction
-					if (transaction !== null) {
-						// A mutator on the upgrade context (`create` / `drop` / `store` /
-						// `index` / `deindex`) is guarded with `guardSync`, so a bad target
-						// throws a typed `IndexedDBError` SYNCHRONOUSLY from `this.#upgrade`
-						// here — caught the same way as an async upgrade's rejection below,
-						// so it aborts the transaction and fails `connect()` with `UPGRADE`
-						// instead of escaping as an unhandled exception from this event
-						// handler.
-						try {
-							const result = this.#upgrade(this.#context(database, transaction, event))
-							if (result !== undefined) {
-								result.catch((error: unknown) => {
-									upgradeError = error
-									try {
-										transaction.abort()
-									} catch {
-										// Already settled — the versionchange transaction committed or
-										// aborted before the rejection arrived; nothing to roll back.
-									}
-								})
-							}
-						} catch (error) {
-							upgradeError = error
-							try {
-								transaction.abort()
-							} catch {
-								// Already settled — nothing to roll back.
-							}
+
+				// Built-in construction and the custom callback are one atomic
+				// upgrade phase, so every synchronous schema fault reaches the same
+				// typed boundary and prevents the custom phase from running.
+				try {
+					for (const [name, definition] of Object.entries(this.#stores)) {
+						if (!database.objectStoreNames.contains(name)) {
+							this.#createUpgradeStore(database, name, definition)
 						}
+					}
+					if (this.#upgrade !== undefined) {
+						const result = this.#upgrade(this.#context(database, transaction, event))
+						if (result !== undefined) {
+							result.catch((error: unknown) => {
+								if (upgradeFailure === undefined) upgradeFailure = { cause: error }
+								try {
+									transaction.abort()
+								} catch {
+									// Custom code may already have settled or aborted the transaction
+									// before its rejection reaches this continuation.
+								}
+							})
+						}
+					}
+				} catch (error) {
+					if (upgradeFailure === undefined) upgradeFailure = { cause: error }
+					try {
+						transaction.abort()
+					} catch {
+						// Custom code may already have aborted the transaction before
+						// throwing; the initiating failure above remains authoritative.
 					}
 				}
 			})
-			request.addEventListener('success', () => resolve(request.result))
+			request.addEventListener('success', () => {
+				if (upgradeFailure === undefined) {
+					resolve(request.result)
+					return
+				}
+				request.result.close()
+				reject(
+					new IndexedDBError('UPGRADE', `Upgrade of '${this.#name}' failed`, upgradeFailure.cause),
+				)
+			})
 			request.addEventListener('error', () =>
 				reject(
-					upgradeError !== undefined
-						? new IndexedDBError('UPGRADE', `Upgrade of '${this.#name}' failed`, upgradeError)
+					upgradeFailure !== undefined
+						? new IndexedDBError(
+								'UPGRADE',
+								`Upgrade of '${this.#name}' failed`,
+								upgradeFailure.cause,
+							)
 						: new IndexedDBError('OPEN', `Failed to open database '${this.#name}'`, request.error),
-				),
-			)
-			request.addEventListener('blocked', () =>
-				reject(
-					new IndexedDBError('BLOCKED', `Open of '${this.#name}' is blocked by another connection`),
 				),
 			)
 		})
@@ -310,14 +327,15 @@ export class IndexedDBDatabase<
 		}
 	}
 
-	#clearConnection(): void {
+	#clearConnection(database: IDBDatabase): void {
+		if (this.#database !== database) return
 		this.#database = undefined
 		this.#opening = undefined
 	}
 
 	#yieldConnection(database: IDBDatabase): void {
 		database.close()
-		this.#clearConnection()
+		this.#clearConnection(database)
 	}
 
 	#createUpgradeStore(database: IDBDatabase, name: string, definition: StoreDefinition): void {

@@ -85,6 +85,265 @@ describe('IndexedDBDatabase — connection and state', () => {
 	})
 })
 
+describe('IndexedDBDatabase — blocked lifecycle', () => {
+	it('keeps one versioned open pending until its raw blocker closes', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const request = globalThis.indexedDB.open(name, 1)
+		request.addEventListener('upgradeneeded', () => {
+			request.result.createObjectStore('users', { keyPath: 'id' })
+		})
+		const blocker = await promisifyRequest(request)
+		const requested = new Promise<void>((resolve) => {
+			blocker.addEventListener('versionchange', () => resolve(), { once: true })
+		})
+		let upgrades = 0
+		const db = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' }, posts: { path: 'id' } },
+			upgrade: () => {
+				upgrades += 1
+			},
+		})
+		cleanups.push(async () => {
+			blocker.close()
+			db.close()
+			await deleteDatabase(name)
+		})
+
+		let settled = false
+		const first = db.connect()
+		first.then(
+			() => {
+				settled = true
+			},
+			() => {
+				settled = true
+			},
+		)
+		const second = db.connect()
+		expect(second).toBe(first)
+		await requested
+		await waitForDelay()
+		expect(settled).toBe(false)
+
+		blocker.close()
+		const database = await first
+		expect(await second).toBe(database)
+		expect(upgrades).toBe(1)
+		expect(db.open).toBe(true)
+		expect(db.database).toBe(database)
+
+		await db.drop()
+		expect((await globalThis.indexedDB.databases()).some((entry) => entry.name === name)).toBe(
+			false,
+		)
+	})
+
+	it('keeps deletion pending and the database present until its raw blocker closes', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const request = globalThis.indexedDB.open(name, 1)
+		const blocker = await promisifyRequest(request)
+		const requested = new Promise<void>((resolve) => {
+			blocker.addEventListener('versionchange', () => resolve(), { once: true })
+		})
+		const db = createIndexedDBDatabase({ name, stores: {} })
+		cleanups.push(async () => {
+			blocker.close()
+			db.close()
+			await deleteDatabase(name)
+		})
+
+		let settled = false
+		const dropping = db.drop()
+		dropping.then(
+			() => {
+				settled = true
+			},
+			() => {
+				settled = true
+			},
+		)
+		await requested
+		expect(settled).toBe(false)
+		expect(
+			(await globalThis.indexedDB.databases()).some((database) => database.name === name),
+		).toBe(true)
+		expect(settled).toBe(false)
+
+		blocker.close()
+		await dropping
+		expect(
+			(await globalThis.indexedDB.databases()).some((database) => database.name === name),
+		).toBe(false)
+	})
+
+	it('retires an explicit-version open closed while blocked without orphaning its result', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const request = globalThis.indexedDB.open(name, 1)
+		request.addEventListener('upgradeneeded', () => {
+			request.result.createObjectStore('users', { keyPath: 'id' })
+		})
+		const blocker = await promisifyRequest(request)
+		const requested = new Promise<void>((resolve) => {
+			blocker.addEventListener('versionchange', () => resolve(), { once: true })
+		})
+		const db = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' }, posts: { path: 'id' } },
+		})
+		cleanups.push(async () => {
+			blocker.close()
+			db.close()
+			await deleteDatabase(name)
+		})
+
+		let settled = false
+		const opening = db.connect()
+		opening.then(
+			() => {
+				settled = true
+			},
+			() => {
+				settled = true
+			},
+		)
+		await requested
+		await waitForDelay()
+		expect(settled).toBe(false)
+		db.close()
+		expect(settled).toBe(false)
+		blocker.close()
+
+		const caught = await opening.catch((error: unknown) => error)
+		expect(caught).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(caught)).toBe('CLOSED')
+		expect(db.open).toBe(false)
+		await db.drop()
+		expect(
+			(await globalThis.indexedDB.databases()).some((database) => database.name === name),
+		).toBe(false)
+	})
+
+	it('retires an auto-managed second open closed while blocked without orphaning its result', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const request = globalThis.indexedDB.open(name, 1)
+		request.addEventListener('upgradeneeded', () => {
+			request.result.createObjectStore('users', { keyPath: 'id' })
+		})
+		const blocker = await promisifyRequest(request)
+		const requested = new Promise<void>((resolve) => {
+			blocker.addEventListener('versionchange', () => resolve(), { once: true })
+		})
+		const db = createIndexedDBDatabase({
+			name,
+			stores: { users: { path: 'id' }, posts: { path: 'id' } },
+		})
+		cleanups.push(async () => {
+			blocker.close()
+			db.close()
+			await deleteDatabase(name)
+		})
+
+		let settled = false
+		const opening = db.connect()
+		opening.then(
+			() => {
+				settled = true
+			},
+			() => {
+				settled = true
+			},
+		)
+		await requested
+		await waitForDelay()
+		expect(settled).toBe(false)
+		db.close()
+		expect(settled).toBe(false)
+		blocker.close()
+
+		const caught = await opening.catch((error: unknown) => error)
+		expect(caught).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(caught)).toBe('CLOSED')
+		expect(db.open).toBe(false)
+		await db.drop()
+		expect(
+			(await globalThis.indexedDB.databases()).some((database) => database.name === name),
+		).toBe(false)
+	})
+
+	it('retires a blocked open when drop is requested without orphaning its result', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const request = globalThis.indexedDB.open(name, 1)
+		request.addEventListener('upgradeneeded', () => {
+			request.result.createObjectStore('users', { keyPath: 'id' })
+		})
+		const blocker = await promisifyRequest(request)
+		const requested = new Promise<void>((resolve) => {
+			blocker.addEventListener('versionchange', () => resolve(), { once: true })
+		})
+		const db = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' }, posts: { path: 'id' } },
+		})
+		cleanups.push(async () => {
+			blocker.close()
+			db.close()
+			await deleteDatabase(name)
+		})
+
+		let settled = false
+		const opening = db.connect()
+		opening.then(
+			() => {
+				settled = true
+			},
+			() => {
+				settled = true
+			},
+		)
+		await requested
+		await waitForDelay()
+		expect(settled).toBe(false)
+
+		let dropped = false
+		const dropping = db.drop()
+		dropping.then(
+			() => {
+				dropped = true
+			},
+			() => {
+				dropped = true
+			},
+		)
+		const reconnect = captureError(() => db.connect())
+		expect(reconnect).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(reconnect)).toBe('CLOSED')
+		await waitForDelay()
+		expect(db.open).toBe(false)
+		expect(settled).toBe(false)
+		expect(dropped).toBe(false)
+		blocker.close()
+
+		const caught = await opening.catch((error: unknown) => error)
+		expect(caught).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(caught)).toBe('CLOSED')
+		await dropping
+		expect(dropped).toBe(true)
+		expect(db.open).toBe(false)
+		expect(
+			(await globalThis.indexedDB.databases()).some((database) => database.name === name),
+		).toBe(false)
+	})
+})
+
 describe('IndexedDBDatabase — store accessor', () => {
 	it('reaches a declared store and throws NOT_FOUND for an undeclared one', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
@@ -211,6 +470,88 @@ describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 		expect(v2.stores).toContain('posts')
 		await v2.store('posts').set({ id: 'p1' })
 		expect(await v2.store('posts').get('p1')).toEqual({ id: 'p1' })
+	})
+
+	it('contains built-in schema faults across retries without partial state or orphan connections', async () => {
+		const name = uniqueName()
+		await deleteDatabase(name)
+		const seed = createIndexedDBDatabase({
+			name,
+			version: 1,
+			stores: { users: { path: 'id' } },
+		})
+		cleanups.push(async () => {
+			seed.close()
+			await deleteDatabase(name)
+		})
+		await seed.connect()
+		await seed.store('users').set({ id: 'sentinel', value: 'preserved' })
+		seed.close()
+
+		let callbackCount = 0
+		const failed = createIndexedDBDatabase({
+			name,
+			stores: {
+				users: { path: 'id' },
+				posts: {
+					path: 'id',
+					indexes: [
+						{ name: 'bySlug', path: 'slug' },
+						{ name: 'bySlug', path: 'title' },
+					],
+				},
+			},
+			upgrade: () => {
+				callbackCount += 1
+			},
+		})
+		cleanups.push(async () => {
+			failed.close()
+			await deleteDatabase(name)
+		})
+
+		const first = failed.connect()
+		const firstCaught = await first.catch((error: unknown) => error)
+		expect(failed.open).toBe(false)
+		const second = failed.connect()
+		expect(second).not.toBe(first)
+		const secondCaught = await second.catch((error: unknown) => error)
+
+		for (const caught of [firstCaught, secondCaught]) {
+			expect(caught).toBeInstanceOf(IndexedDBError)
+			expect(errorCode(caught)).toBe('UPGRADE')
+			const schemaCause = caught instanceof IndexedDBError ? caught.cause : undefined
+			expect(schemaCause).toBeInstanceOf(IndexedDBError)
+			expect(errorCode(schemaCause)).toBe('CONSTRAINT')
+			const nativeCause = schemaCause instanceof IndexedDBError ? schemaCause.cause : undefined
+			expect(nativeCause).toBeInstanceOf(DOMException)
+			expect(nativeCause).toHaveProperty('name', 'ConstraintError')
+		}
+		expect(callbackCount).toBe(0)
+		expect(failed.open).toBe(false)
+
+		const valid = createIndexedDBDatabase({
+			name,
+			version: 1,
+			stores: { users: { path: 'id' } },
+		})
+		cleanups.push(async () => {
+			valid.close()
+			await deleteDatabase(name)
+		})
+		await valid.connect()
+		expect(valid.version).toBe(1)
+		expect(await valid.store('users').get('sentinel')).toEqual({
+			id: 'sentinel',
+			value: 'preserved',
+		})
+		expect(valid.database.objectStoreNames.contains('posts')).toBe(false)
+
+		valid.close()
+		await failed.drop()
+		expect(
+			(await globalThis.indexedDB.databases()).some((database) => database.name === name),
+		).toBe(false)
 	})
 })
 
@@ -378,6 +719,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 	it('rejects connect() cleanly when an async upgrade throws after an awaited request', async () => {
 		const name = uniqueName()
 		await deleteDatabase(name)
+		const failure = new Error('migration boom')
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
 		await v1.store('users').set({ id: 'u1', name: 'ada' })
@@ -392,7 +734,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 				// Await a real IDB request first, so the versionchange transaction is
 				// still alive when the throw below happens.
 				await store.records()
-				throw new Error('migration boom')
+				throw failure
 			},
 		})
 		cleanups.push(async () => {
@@ -403,6 +745,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		const caught = await v2.connect().catch((error: unknown) => error)
 		expect(caught).toBeInstanceOf(IndexedDBError)
 		expect(errorCode(caught)).toBe('UPGRADE')
+		expect(caught instanceof IndexedDBError ? caught.cause : undefined).toBe(failure)
 		expect(v2.open).toBe(false)
 
 		// The upgrade never half-applied: the database is still at version 1, and a
@@ -420,6 +763,62 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		await reopened.connect()
 		expect(reopened.version).toBe(1)
 		expect(await reopened.store('users').get('u1')).toEqual({ id: 'u1', name: 'ada' })
+	})
+
+	it('preserves a synchronous undefined upgrade failure as a present cause', async () => {
+		const name = uniqueName()
+		const failure: unknown = undefined
+		await deleteDatabase(name)
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' } },
+			upgrade: () => {
+				throw failure
+			},
+		})
+		cleanups.push(async () => {
+			v2.close()
+			await deleteDatabase(name)
+		})
+		const caught = await v2.connect().catch((error: unknown) => error)
+		const upgrade = caught instanceof IndexedDBError ? caught : undefined
+		expect(caught).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(caught)).toBe('UPGRADE')
+		expect(Object.hasOwn(upgrade ?? {}, 'cause')).toBe(true)
+		expect(upgrade?.cause).toBeUndefined()
+		expect(v2.open).toBe(false)
+	})
+
+	it('preserves an asynchronously rejected undefined upgrade failure as a present cause', async () => {
+		const name = uniqueName()
+		const failure: unknown = undefined
+		await deleteDatabase(name)
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' } },
+			upgrade: () => Promise.reject(failure),
+		})
+		cleanups.push(async () => {
+			v2.close()
+			await deleteDatabase(name)
+		})
+		const caught = await v2.connect().catch((error: unknown) => error)
+		const upgrade = caught instanceof IndexedDBError ? caught : undefined
+		expect(caught).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(caught)).toBe('UPGRADE')
+		expect(Object.hasOwn(upgrade ?? {}, 'cause')).toBe(true)
+		expect(upgrade?.cause).toBeUndefined()
+		expect(v2.open).toBe(false)
 	})
 
 	it('creates a store via context.create, honouring its definition', async () => {
