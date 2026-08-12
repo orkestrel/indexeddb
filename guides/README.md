@@ -7,23 +7,23 @@ directory (AGENTS §22).
 
 | Concept   | Spec                                   | Source                          | Tests                                       |
 | --------- | -------------------------------------- | ------------------------------- | ------------------------------------------- |
-| IndexedDB | [`src/indexeddb.md`](src/indexeddb.md) | [`src/browser`](../src/browser) | [`tests/src/browser`](../tests/src/browser) |
+| IndexedDB | [`indexeddb.md`](indexeddb.md) | [`src/browser`](../src/browser) | [`tests/src/browser`](../tests/src/browser) |
 
 ## By directory
 
 | Directory     | Guide                                  |
 | ------------- | -------------------------------------- |
-| `src/browser` | [`src/indexeddb.md`](src/indexeddb.md) |
+| `src/browser` | [`indexeddb.md`](indexeddb.md) |
 
 ## Dependency reference
 
-[`src/contract.md`](src/contract.md) is a byte-identical mirror of the guide for
+[`contract.md`](contract.md) is a byte-identical mirror of the guide for
 `@orkestrel/contract` — this package's sole runtime dependency. It documents
 **that package's** surface (guards, combinators, parsers, and the shape DSL), not
 anything sourced in this repo; it is kept here so a reader of this package can see
 the primitives it is built from without leaving this guide set.
 
-[`src/guide.md`](src/guide.md) is a byte-identical mirror of the guide for
+[`guide.md`](guide.md) is a byte-identical mirror of the guide for
 `@orkestrel/guide` — the devDependency powering this repo's guides-parity test
 suite (`tests/guides.test.ts`). It documents **that package's**
 surface (`Guide` / `Source`, the manifest and comparison helpers), not anything
