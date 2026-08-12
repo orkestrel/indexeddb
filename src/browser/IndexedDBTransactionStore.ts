@@ -33,11 +33,11 @@ export class IndexedDBTransactionStore implements IndexedDBTransactionStoreInter
 		return this.#store
 	}
 
-	get(keys: readonly IDBValidKey[]): Promise<readonly (Row | undefined)[]>
+	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<Row | undefined>>
 	get(key: IDBValidKey): Promise<Row | undefined>
 	async get(
 		keyOrKeys: IDBValidKey | readonly IDBValidKey[],
-	): Promise<Row | undefined | readonly (Row | undefined)[]> {
+	): Promise<Row | undefined | ReadonlyArray<Row | undefined>> {
 		if (isArray<IDBValidKey>(keyOrKeys)) {
 			return Promise.all(keyOrKeys.map((key) => readRecord(this.#store, key)))
 		}

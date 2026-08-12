@@ -256,7 +256,7 @@ export interface IndexedDBIndexInterface {
 	readonly path: KeyPath
 	readonly unique: boolean
 	readonly multiple: boolean
-	get(keys: readonly IDBValidKey[]): Promise<readonly (Row | undefined)[]>
+	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<Row | undefined>>
 	get(key: IDBValidKey): Promise<Row | undefined>
 	resolve(keys: readonly IDBValidKey[]): Promise<readonly Row[]>
 	resolve(key: IDBValidKey): Promise<Row>
@@ -290,7 +290,7 @@ export interface IndexedDBStoreInterface {
 	readonly path: KeyPath | null
 	readonly indexes: readonly string[]
 	readonly increment: boolean
-	get(keys: readonly IDBValidKey[]): Promise<readonly (Row | undefined)[]>
+	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<Row | undefined>>
 	get(key: IDBValidKey): Promise<Row | undefined>
 	resolve(keys: readonly IDBValidKey[]): Promise<readonly Row[]>
 	resolve(key: IDBValidKey): Promise<Row>
@@ -323,7 +323,7 @@ export interface IndexedDBStoreInterface {
  */
 export interface IndexedDBTransactionStoreInterface {
 	readonly store: IDBObjectStore
-	get(keys: readonly IDBValidKey[]): Promise<readonly (Row | undefined)[]>
+	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<Row | undefined>>
 	get(key: IDBValidKey): Promise<Row | undefined>
 	resolve(keys: readonly IDBValidKey[]): Promise<readonly Row[]>
 	resolve(key: IDBValidKey): Promise<Row>
@@ -392,11 +392,11 @@ export interface IndexedDBDatabaseInterface<Stores extends StoresShape = StoresS
 	connect(): Promise<IDBDatabase>
 	store<K extends keyof Stores & string>(name: K): IndexedDBStoreInterface
 	read(
-		stores: (keyof Stores & string) | readonly (keyof Stores & string)[],
+		stores: (keyof Stores & string) | ReadonlyArray<keyof Stores & string>,
 		scope: (tx: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
 	): Promise<void>
 	write(
-		stores: (keyof Stores & string) | readonly (keyof Stores & string)[],
+		stores: (keyof Stores & string) | ReadonlyArray<keyof Stores & string>,
 		scope: (tx: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
 	): Promise<void>
 	close(): void

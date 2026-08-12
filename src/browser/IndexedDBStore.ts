@@ -61,11 +61,11 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 		return this.#definition.increment ?? false
 	}
 
-	get(keys: readonly IDBValidKey[]): Promise<readonly (Row | undefined)[]>
+	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<Row | undefined>>
 	get(key: IDBValidKey): Promise<Row | undefined>
 	async get(
 		keyOrKeys: IDBValidKey | readonly IDBValidKey[],
-	): Promise<Row | undefined | readonly (Row | undefined)[]> {
+	): Promise<Row | undefined | ReadonlyArray<Row | undefined>> {
 		const store = await this.#store('readonly')
 		if (isArray<IDBValidKey>(keyOrKeys)) {
 			return Promise.all(keyOrKeys.map((key) => readRecord(store, key)))

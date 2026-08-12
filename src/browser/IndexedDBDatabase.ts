@@ -115,14 +115,14 @@ export class IndexedDBDatabase<
 	}
 
 	read(
-		stores: (keyof Stores & string) | readonly (keyof Stores & string)[],
+		stores: (keyof Stores & string) | ReadonlyArray<keyof Stores & string>,
 		scope: (tx: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
 	): Promise<void> {
 		return this.#run('readonly', stores, scope)
 	}
 
 	write(
-		stores: (keyof Stores & string) | readonly (keyof Stores & string)[],
+		stores: (keyof Stores & string) | ReadonlyArray<keyof Stores & string>,
 		scope: (tx: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
 	): Promise<void> {
 		return this.#run('readwrite', stores, scope)
@@ -151,7 +151,7 @@ export class IndexedDBDatabase<
 	// Open a scoped transaction, run the scope, then commit (or roll back on throw).
 	async #run(
 		mode: IDBTransactionMode,
-		stores: (keyof Stores & string) | readonly (keyof Stores & string)[],
+		stores: (keyof Stores & string) | ReadonlyArray<keyof Stores & string>,
 		scope: (tx: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
 	): Promise<void> {
 		const database = await this.connect()
