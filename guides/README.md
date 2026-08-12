@@ -5,14 +5,14 @@ directory (AGENTS §22).
 
 ## By concept
 
-| Concept   | Spec                                   | Source                          | Tests                                       |
-| --------- | -------------------------------------- | ------------------------------- | ------------------------------------------- |
+| Concept   | Spec                           | Source                          | Tests                                       |
+| --------- | ------------------------------ | ------------------------------- | ------------------------------------------- |
 | IndexedDB | [`indexeddb.md`](indexeddb.md) | [`src/browser`](../src/browser) | [`tests/src/browser`](../tests/src/browser) |
 
 ## By directory
 
-| Directory     | Guide                                  |
-| ------------- | -------------------------------------- |
+| Directory     | Guide                          |
+| ------------- | ------------------------------ |
 | `src/browser` | [`indexeddb.md`](indexeddb.md) |
 
 ## Dependency reference
