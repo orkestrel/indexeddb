@@ -1,6 +1,6 @@
 {
 	"name": "@orkestrel/indexeddb",
-	"version": "0.0.6",
+	"version": "0.0.7",
 	"description": "A typed, Promise-based wrapper over browser IndexedDB — object stores, secondary indexes, native key ranges, cursors, and versioned schema upgrades. Part of the @orkestrel line.",
 	"keywords": [
 		"browser",
@@ -61,7 +61,7 @@
 		"prepublishOnly": "npm run format:check && npm run lint:check && npm run check && npm run build && npm test"
 	},
 	"dependencies": {
-		"@orkestrel/contract": "^0.0.10"
+		"@orkestrel/contract": "^0.0.11"
 	},
 	"devDependencies": {
 		"@microsoft/api-extractor": "^7.58.12",
