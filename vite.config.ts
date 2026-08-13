@@ -71,6 +71,7 @@ export const srcBrowser = (options?: UserConfig): UserConfig =>
 				name: { label: 'src:browser', color: 'yellow' },
 				include: ['tests/src/browser/**/*.test.ts'],
 				setupFiles: ['./tests/setup.ts', './tests/setupBrowser.ts'],
+
 				browser: {
 					enabled: true,
 					provider: playwright(browserOptions),
