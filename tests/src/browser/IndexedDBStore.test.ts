@@ -1,6 +1,6 @@
 import { IndexedDBError, rangeExactKey, rangeFromKey, rangePrefix } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { captureError } from '../../setup.js'
+import { captureError } from '@orkestrel/test'
 import { createCleanups, createTestDatabase, drainCursor, errorCode } from '../../setupBrowser.js'
 
 // `IndexedDBStoreInterface` in real Chromium, reached through `db.store(name)`:

@@ -6,7 +6,7 @@ import {
 	promisifyTransaction,
 } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { captureError, waitForDelay } from '../../setup.js'
+import { captureError, waitForDelay } from '@orkestrel/test'
 import {
 	createCleanups,
 	createTestDatabase,

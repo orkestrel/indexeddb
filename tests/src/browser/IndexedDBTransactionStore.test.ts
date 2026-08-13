@@ -1,7 +1,7 @@
 import type { IndexedDBTransactionStoreInterface } from '@src/browser'
 import { IndexedDBError, rangeFromKey } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { waitForDelay } from '../../setup.js'
+import { waitForDelay } from '@orkestrel/test'
 import { createCleanups, createTestDatabase, drainCursor, errorCode } from '../../setupBrowser.js'
 
 // `IndexedDBTransactionStoreInterface` in real Chromium, reached through
