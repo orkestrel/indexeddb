@@ -18,13 +18,8 @@ import {
 	wrapError,
 } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import {
-	createCleanups,
-	createTestDatabase,
-	deleteDatabase,
-	errorCode,
-	uniqueName,
-} from '../../setupBrowser.js'
+import { createTeardown } from '@orkestrel/test'
+import { createTestDatabase, dropDatabase, errorCode, uniqueName } from '../../setupBrowser.js'
 
 // The browser surface's helpers (`src/browser/helpers.ts`), exercised in real
 // Chromium: the feature probe `isIndexedDBSupported` (the entry gate a consumer
@@ -49,9 +44,9 @@ describe('src/browser environment', () => {
 	})
 })
 
-const cleanups = createCleanups()
+const teardown = createTeardown()
 
-afterEach(cleanups.run)
+afterEach(teardown.destroy)
 
 describe('key-range builders', () => {
 	it('only is a single-value, fully-closed bound', () => {
@@ -125,7 +120,7 @@ describe('key-range builders', () => {
 describe('readRecord / readRecords / hasKey — over a real store', () => {
 	it('readRecord returns a record, and narrows a non-record clone to undefined', async () => {
 		const { db, cleanup } = await createTestDatabase({ store: {} })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.write('store', async (tx) => {
 			const native = tx.store('store').store
 			await promisifyRequest(native.put({ id: 'r1' }, 'r1'))
@@ -141,7 +136,7 @@ describe('readRecord / readRecords / hasKey — over a real store', () => {
 
 	it('readRecords keeps only records and honours a key range and count', async () => {
 		const { db, cleanup } = await createTestDatabase({ store: {} })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.write('store', async (tx) => {
 			const native = tx.store('store').store
 			await promisifyRequest(native.put({ id: 'a' }, 'a'))
@@ -160,7 +155,7 @@ describe('readRecord / readRecords / hasKey — over a real store', () => {
 		const { db, cleanup } = await createTestDatabase({
 			users: { path: 'id', indexes: [{ name: 'byAge', path: 'age' }] },
 		})
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.store('users').set([
 			{ id: 'a', age: 20 },
 			{ id: 'b', age: 30 },
@@ -174,7 +169,7 @@ describe('readRecord / readRecords / hasKey — over a real store', () => {
 
 	it('hasKey reports presence by a native count', async () => {
 		const { db, cleanup } = await createTestDatabase({ store: {} })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.write('store', async (tx) => {
 			await promisifyRequest(tx.store('store').store.put({ id: 'x' }, 'x'))
 		})
@@ -189,7 +184,7 @@ describe('readRecord / readRecords / hasKey — over a real store', () => {
 describe('createIndex — index-DDL leaf', () => {
 	it('translates an IndexDefinition into a native createIndex call, honouring unique / multiple', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const opened = await new Promise<IDBDatabase>((resolve, reject) => {
 			const request = globalThis.indexedDB.open(name, 1)
 			request.onupgradeneeded = () => {
@@ -200,9 +195,9 @@ describe('createIndex — index-DDL leaf', () => {
 			request.onsuccess = () => resolve(request.result)
 			request.onerror = () => reject(request.error)
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			opened.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 
 		const readTx = opened.transaction(['tags'], 'readonly')
@@ -238,7 +233,7 @@ describe('createIndex — index-DDL leaf', () => {
 describe('promisifyRequest — IDBRequest bridge', () => {
 	it('resolves to the request result on success', async () => {
 		const { db, cleanup } = await createTestDatabase({ store: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.write('store', async (tx) => {
 			const native = tx.store('store').store
 			const key = await promisifyRequest(native.add({ id: 'u1' }))
@@ -251,7 +246,7 @@ describe('promisifyRequest — IDBRequest bridge', () => {
 
 	it('rejects with an IndexedDBError carrying the mapped code', async () => {
 		const { db, cleanup } = await createTestDatabase({ store: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.store('store').set({ id: 'u1' })
 		let caught: unknown
 		await db
@@ -271,7 +266,7 @@ describe('promisifyRequest — IDBRequest bridge', () => {
 describe('promisifyTransaction — IDBTransaction bridge', () => {
 	it('resolves once the transaction commits, making writes durable', async () => {
 		const { db, cleanup } = await createTestDatabase({ store: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const native = db.database.transaction(['store'], 'readwrite')
 		const store = native.objectStore('store')
 		await promisifyRequest(store.add({ id: 'u1', name: 'Ada' }))
@@ -282,7 +277,7 @@ describe('promisifyTransaction — IDBTransaction bridge', () => {
 
 	it('rejects when the transaction aborts', async () => {
 		const { db, cleanup } = await createTestDatabase({ store: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const native = db.database.transaction(['store'], 'readwrite')
 		const store = native.objectStore('store')
 		await promisifyRequest(store.add({ id: 'u1' }))

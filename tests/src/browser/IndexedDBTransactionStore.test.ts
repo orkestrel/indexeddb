@@ -1,8 +1,8 @@
 import type { IndexedDBTransactionStoreInterface } from '@src/browser'
 import { IndexedDBError, rangeFromKey } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { waitForDelay } from '@orkestrel/test'
-import { createCleanups, createTestDatabase, drainCursor, errorCode } from '../../setupBrowser.js'
+import { createTeardown, waitForDelay } from '@orkestrel/test'
+import { createTestDatabase, drainCursor, errorCode } from '../../setupBrowser.js'
 
 // `IndexedDBTransactionStoreInterface` in real Chromium, reached through
 // `tx.store(name)` inside a `db.read` / `db.write` scope: the live `store`
@@ -11,14 +11,14 @@ import { createCleanups, createTestDatabase, drainCursor, errorCode } from '../.
 // transaction — so a sequence of reads and writes is atomic — and WITHOUT
 // `index`. Each test opens a uniquely-named database through the shared opener.
 
-const cleanups = createCleanups()
+const teardown = createTeardown()
 
-afterEach(cleanups.run)
+afterEach(teardown.destroy)
 
 describe('IndexedDBTransactionStore — store handle', () => {
 	it('exposes the live native object store', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.read('users', (tx) => {
 			const bound = tx.store('users')
 			expect(bound.store).toBeInstanceOf(IDBObjectStore)
@@ -30,7 +30,7 @@ describe('IndexedDBTransactionStore — store handle', () => {
 describe('IndexedDBTransactionStore — CRUD within a scope', () => {
 	it('reads back its own uncommitted writes inside one scope', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		let seen: unknown
 		let present = false
 		let total = 0
@@ -51,7 +51,7 @@ describe('IndexedDBTransactionStore — CRUD within a scope', () => {
 
 	it('resolve throws NOT_FOUND on a miss within the scope', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		let caught: unknown
 		await db.read('users', async (tx) => {
 			caught = await tx
@@ -65,7 +65,7 @@ describe('IndexedDBTransactionStore — CRUD within a scope', () => {
 
 	it('add throws CONSTRAINT on a duplicate within the scope', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.store('users').set({ id: 'u1' })
 		let caught: unknown
 		await db
@@ -82,7 +82,7 @@ describe('IndexedDBTransactionStore — CRUD within a scope', () => {
 
 	it('lists keys / records over a range and clears within the scope', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.write('users', async (tx) => {
 			const users = tx.store('users')
 			await users.set([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
@@ -100,7 +100,7 @@ describe('IndexedDBTransactionStore — CRUD within a scope', () => {
 describe('IndexedDBTransactionStore — array-first batch overloads', () => {
 	it('batches set / get / has / remove inside the scope', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		let gotten: unknown
 		let presence: readonly boolean[] = []
 		await db.write('users', async (tx) => {
@@ -120,7 +120,7 @@ describe('IndexedDBTransactionStore — array-first batch overloads', () => {
 describe('IndexedDBTransactionStore — out-of-line keys and cursor', () => {
 	it('writes out-of-line keys with an explicit key argument', async () => {
 		const { db, cleanup } = await createTestDatabase({ events: {} })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.write('events', async (tx) => {
 			await tx.store('events').set({ type: 'click' }, 'e1')
 		})
@@ -129,7 +129,7 @@ describe('IndexedDBTransactionStore — out-of-line keys and cursor', () => {
 
 	it('opens a cursor within the scope', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.store('users').set([{ id: 'a' }, { id: 'b' }])
 		let ids: readonly string[] = []
 		await db.read('users', async (tx) => {
@@ -141,7 +141,7 @@ describe('IndexedDBTransactionStore — out-of-line keys and cursor', () => {
 
 	it('rolls every write in the scope back when it throws', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.store('users').set({ id: 'u1', n: 1 })
 		await db
 			.write('users', async (tx) => {
@@ -159,7 +159,7 @@ describe('IndexedDBTransactionStore — out-of-line keys and cursor', () => {
 describe('IndexedDBTransactionStore — synchronous native faults', () => {
 	it('throws a real INACTIVE once the owning transaction auto-commits out from under it', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		let captured: IndexedDBTransactionStoreInterface | undefined
 		await db.write('users', (tx) => {
 			// Capture the transaction-bound store but issue no request on it — the

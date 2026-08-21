@@ -1,12 +1,7 @@
 import { IndexedDBError, rangeFromKey } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import {
-	createCleanups,
-	createTestDatabase,
-	drainCursor,
-	errorCode,
-	seedStore,
-} from '../../setupBrowser.js'
+import { createTeardown } from '@orkestrel/test'
+import { createTestDatabase, drainCursor, errorCode, seedStore } from '../../setupBrowser.js'
 
 // `IndexedDBCursorInterface` in real Chromium, obtained from a store or index
 // cursor: the position snapshot (`cursor` / `source` / `key` / `primary` /
@@ -16,14 +11,14 @@ import {
 // against the recorded `IndexedDBCursor`, not a re-read. Each test opens a
 // uniquely-named database through the shared opener.
 
-const cleanups = createCleanups()
+const teardown = createTeardown()
 
-afterEach(cleanups.run)
+afterEach(teardown.destroy)
 
 // The plain `users` seed (primary key `id`, three numbered rows) lives in
-// `setupBrowser.ts` (§16.1); each call registers its cleanup with this file's
-// teardown via the `cleanups` registrar.
-const seed = (): ReturnType<typeof seedStore> => seedStore(cleanups.push)
+// `setupBrowser.ts` (§16.1); each call adds its cleanup to this file's
+// `teardown` list.
+const seed = (): ReturnType<typeof seedStore> => seedStore(teardown)
 
 describe('IndexedDBCursor — position snapshot', () => {
 	it('snapshots key / primary / value / direction / source at the current record', async () => {
@@ -87,7 +82,7 @@ describe('IndexedDBCursor — moves', () => {
 		const { db, cleanup } = await createTestDatabase({
 			users: { path: 'id', indexes: [{ name: 'byAge', path: 'age' }] },
 		})
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.store('users').set([
 			{ id: 'a', age: 30 },
 			{ id: 'b', age: 30 },
@@ -136,7 +131,7 @@ describe('IndexedDBCursor — in-place mutation', () => {
 		const { db, cleanup } = await createTestDatabase({
 			users: { path: 'id', indexes: [{ name: 'byAge', path: 'age' }] },
 		})
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.store('users').set({ id: 'a', age: 20 })
 		const cursor = await db.store('users').index('byAge').cursor()
 		expect(cursor).not.toBeNull()
@@ -152,7 +147,7 @@ describe('IndexedDBCursor — in-place mutation', () => {
 		const { db, cleanup } = await createTestDatabase({
 			users: { path: 'id', indexes: [{ name: 'byAge', path: 'age' }] },
 		})
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.store('users').set({ id: 'a', age: 20 })
 		// A fresh cursor for `delete` — a failed `update` above can invalidate its
 		// own cursor/request, so `delete` is asserted on an independent cursor

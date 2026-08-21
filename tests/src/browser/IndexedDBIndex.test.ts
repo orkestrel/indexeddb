@@ -1,12 +1,7 @@
 import { IndexedDBError, rangeAboveKey, rangeBetweenKeys, rangeFromKey } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import {
-	createCleanups,
-	createTestDatabase,
-	drainCursor,
-	errorCode,
-	seedUsers,
-} from '../../setupBrowser.js'
+import { createTeardown } from '@orkestrel/test'
+import { createTestDatabase, drainCursor, errorCode, seedUsers } from '../../setupBrowser.js'
 
 // `IndexedDBIndexInterface` in real Chromium, reached through
 // `store.index(name)` over a store declaring a secondary index: the metadata
@@ -16,14 +11,14 @@ import {
 // and constraint, the `multiple` (multiEntry) array index, and the `NOT_FOUND`
 // fault. Each test opens a uniquely-named database through the shared opener.
 
-const cleanups = createCleanups()
+const teardown = createTeardown()
 
-afterEach(cleanups.run)
+afterEach(teardown.destroy)
 
 // The `users` seed (non-unique `byAge` + unique `byEmail`, ages 20/30/40) lives in
-// `setupBrowser.ts` (§16.1); each call registers its cleanup with this file's
-// teardown via the `cleanups` registrar.
-const seed = (): ReturnType<typeof seedUsers> => seedUsers(cleanups.push)
+// `setupBrowser.ts` (§16.1); each call adds its cleanup to this file's
+// `teardown` list.
+const seed = (): ReturnType<typeof seedUsers> => seedUsers(teardown)
 
 describe('IndexedDBIndex — metadata', () => {
 	it('reports its declared name, path, and flags', async () => {
@@ -110,7 +105,7 @@ describe('IndexedDBIndex — unique constraint', () => {
 				indexes: [{ name: 'byEmail', path: 'email', unique: true }],
 			},
 		})
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const users = db.store('users')
 		await users.set({ id: 'a', email: 'dup@x.io' })
 		const caught = await users.set({ id: 'b', email: 'dup@x.io' }).catch((error: unknown) => error)
@@ -127,7 +122,7 @@ describe('IndexedDBIndex — multiEntry (multiple)', () => {
 				indexes: [{ name: 'byTag', path: 'tags', multiple: true }],
 			},
 		})
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const posts = db.store('posts')
 		const byTag = posts.index('byTag')
 		expect(byTag.multiple).toBe(true)

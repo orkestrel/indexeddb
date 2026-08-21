@@ -1,6 +1,7 @@
 import { createIndexedDBDatabase, rangeFromKey } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createCleanups, deleteDatabase, uniqueName } from '../../setupBrowser.js'
+import { createTeardown } from '@orkestrel/test'
+import { dropDatabase, uniqueName } from '../../setupBrowser.js'
 
 // `createIndexedDBDatabase` (`src/browser/factories.ts`) in real
 // Chromium: the factory returns a working `IndexedDBDatabaseInterface` — it
@@ -8,14 +9,14 @@ import { createCleanups, deleteDatabase, uniqueName } from '../../setupBrowser.j
 // real data. This file pins the factory's product (the database test pins the
 // handle's full surface); the schema here is exercised end to end.
 
-const cleanups = createCleanups()
+const teardown = createTeardown()
 
-afterEach(cleanups.run)
+afterEach(teardown.destroy)
 
 describe('createIndexedDBDatabase', () => {
 	it('returns a connecting, round-tripping database over its schema', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const db = createIndexedDBDatabase({
 			name,
 			version: 1,
@@ -23,9 +24,9 @@ describe('createIndexedDBDatabase', () => {
 				users: { path: 'id', indexes: [{ name: 'byAge', path: 'age' }] },
 			},
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			db.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		// A handle, not yet connected.
 		expect(db.name).toBe(name)
@@ -45,11 +46,11 @@ describe('createIndexedDBDatabase', () => {
 
 	it('opens in auto-managed mode when no version is given', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const db = createIndexedDBDatabase({ name, stores: { items: { path: 'id' } } })
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			db.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		await db.connect()
 		expect(db.version).toBe(1) // auto-managed: settled at the created version

@@ -1,8 +1,8 @@
 import type { IndexedDBTransactionInterface } from '@src/browser'
 import { IndexedDBError } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { captureError } from '@orkestrel/test'
-import { createCleanups, createTestDatabase, errorCode } from '../../setupBrowser.js'
+import { captureError, createTeardown } from '@orkestrel/test'
+import { createTestDatabase, errorCode } from '../../setupBrowser.js'
 
 // `IndexedDBTransactionInterface` in real Chromium, obtained through the `scope`
 // callback of `db.read` / `db.write`: the metadata getters (`transaction` /
@@ -12,9 +12,9 @@ import { createCleanups, createTestDatabase, errorCode } from '../../setupBrowse
 // the captured reference lets a few outlive the scope. Each test opens a
 // uniquely-named database through the shared opener.
 
-const cleanups = createCleanups()
+const teardown = createTeardown()
 
-afterEach(cleanups.run)
+afterEach(teardown.destroy)
 
 describe('IndexedDBTransaction — metadata', () => {
 	it('reports its native transaction, mode, and scope', async () => {
@@ -22,7 +22,7 @@ describe('IndexedDBTransaction — metadata', () => {
 			users: { path: 'id' },
 			posts: { path: 'id' },
 		})
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.read(['users', 'posts'], (tx) => {
 			expect(tx.transaction).toBeInstanceOf(IDBTransaction)
 			expect(tx.mode).toBe('readonly')
@@ -35,7 +35,7 @@ describe('IndexedDBTransaction — metadata', () => {
 
 	it('a write scope reports the readwrite mode', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.write('users', (tx) => {
 			expect(tx.mode).toBe('readwrite')
 		})
@@ -48,7 +48,7 @@ describe('IndexedDBTransaction — scoped store access', () => {
 			users: { path: 'id' },
 			posts: { path: 'id' },
 		})
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.read('users', (tx) => {
 			expect(tx.store('users').store).toBeInstanceOf(IDBObjectStore)
 			const caught = captureError(() => tx.store('posts')) // not in this transaction's scope
@@ -59,7 +59,7 @@ describe('IndexedDBTransaction — scoped store access', () => {
 
 	it('throws ABORTED when reaching a store after the transaction aborts', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		// Abort, then capture the fault from reaching a store on the dead transaction.
 		// The aborted scope rejects, so the write is caught; the captured error is
 		// asserted unconditionally afterwards (no conditional expect).
@@ -82,7 +82,7 @@ describe('IndexedDBTransaction — scoped store access', () => {
 describe('IndexedDBTransaction — abort', () => {
 	it('rolls every write in the scope back and marks itself finished', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.store('users').set({ id: 'u1', n: 1 })
 		// Capture the transaction and its post-abort state; assert unconditionally
 		// after the (rejected, caught) scope settles.
@@ -110,7 +110,7 @@ describe('IndexedDBTransaction — abort', () => {
 
 	it('throws INACTIVE when aborting an already-finished transaction', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		let caught: unknown
 		await db
 			.write('users', (tx) => {
@@ -130,7 +130,7 @@ describe('IndexedDBTransaction — abort', () => {
 describe('IndexedDBTransaction — commit', () => {
 	it('flushes the scope early and persists its writes', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.write('users', async (tx) => {
 			await tx.store('users').set({ id: 'u1', name: 'Ada' })
 			tx.commit()
@@ -140,7 +140,7 @@ describe('IndexedDBTransaction — commit', () => {
 
 	it('throws INACTIVE when committing an already-finished transaction', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		let caught: unknown
 		await db
 			.write('users', (tx) => {

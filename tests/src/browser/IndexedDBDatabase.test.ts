@@ -6,14 +6,8 @@ import {
 	promisifyTransaction,
 } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { captureError, waitForDelay } from '@orkestrel/test'
-import {
-	createCleanups,
-	createTestDatabase,
-	deleteDatabase,
-	errorCode,
-	uniqueName,
-} from '../../setupBrowser.js'
+import { captureError, createTeardown, waitForDelay } from '@orkestrel/test'
+import { createTestDatabase, dropDatabase, errorCode, uniqueName } from '../../setupBrowser.js'
 
 // The `IndexedDBDatabaseInterface` surface in real Chromium: lazy connect and
 // state (`name` / `version` / `stores` / `open` / `database`), the `store`
@@ -24,17 +18,17 @@ import {
 // indexes, cursors, transaction-bound stores) lives in the matching per-entity
 // files; this file pins only the database handle's own contract.
 
-const cleanups = createCleanups()
+const teardown = createTeardown()
 
-afterEach(cleanups.run)
+afterEach(teardown.destroy)
 
 describe('IndexedDBDatabase — connection and state', () => {
 	it('connects lazily and reports its state', async () => {
 		const name = uniqueName()
 		const db = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			db.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		// Before connect: declared values, no live handle.
 		expect(db.name).toBe(name)
@@ -60,7 +54,7 @@ describe('IndexedDBDatabase — connection and state', () => {
 			users: { path: 'id' },
 			posts: { path: 'id' },
 		})
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		expect([...db.stores].sort()).toEqual(['posts', 'users'])
 	})
 
@@ -76,7 +70,7 @@ describe('IndexedDBDatabase — connection and state', () => {
 
 	it('throws CLOSED on connect once closed', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		db.close()
 		expect(db.open).toBe(false)
 		const caught = captureError(() => db.connect())
@@ -88,7 +82,7 @@ describe('IndexedDBDatabase — connection and state', () => {
 describe('IndexedDBDatabase — blocked lifecycle', () => {
 	it('keeps one versioned open pending until its raw blocker closes', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const request = globalThis.indexedDB.open(name, 1)
 		request.addEventListener('upgradeneeded', () => {
 			request.result.createObjectStore('users', { keyPath: 'id' })
@@ -106,10 +100,10 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 				upgrades += 1
 			},
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			blocker.close()
 			db.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 
 		let settled = false
@@ -143,17 +137,17 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 
 	it('keeps deletion pending and the database present until its raw blocker closes', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const request = globalThis.indexedDB.open(name, 1)
 		const blocker = await promisifyRequest(request)
 		const requested = new Promise<void>((resolve) => {
 			blocker.addEventListener('versionchange', () => resolve(), { once: true })
 		})
 		const db = createIndexedDBDatabase({ name, stores: {} })
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			blocker.close()
 			db.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 
 		let settled = false
@@ -182,7 +176,7 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 
 	it('retires an explicit-version open closed while blocked without orphaning its result', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const request = globalThis.indexedDB.open(name, 1)
 		request.addEventListener('upgradeneeded', () => {
 			request.result.createObjectStore('users', { keyPath: 'id' })
@@ -196,10 +190,10 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 			version: 2,
 			stores: { users: { path: 'id' }, posts: { path: 'id' } },
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			blocker.close()
 			db.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 
 		let settled = false
@@ -231,7 +225,7 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 
 	it('retires an auto-managed second open closed while blocked without orphaning its result', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const request = globalThis.indexedDB.open(name, 1)
 		request.addEventListener('upgradeneeded', () => {
 			request.result.createObjectStore('users', { keyPath: 'id' })
@@ -244,10 +238,10 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 			name,
 			stores: { users: { path: 'id' }, posts: { path: 'id' } },
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			blocker.close()
 			db.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 
 		let settled = false
@@ -279,7 +273,7 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 
 	it('retires a blocked open when drop is requested without orphaning its result', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const request = globalThis.indexedDB.open(name, 1)
 		request.addEventListener('upgradeneeded', () => {
 			request.result.createObjectStore('users', { keyPath: 'id' })
@@ -293,10 +287,10 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 			version: 2,
 			stores: { users: { path: 'id' }, posts: { path: 'id' } },
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			blocker.close()
 			db.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 
 		let settled = false
@@ -347,7 +341,7 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 describe('IndexedDBDatabase — store accessor', () => {
 	it('reaches a declared store and throws NOT_FOUND for an undeclared one', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const users = db.store('users')
 		expect(users.name).toBe('users')
 		expect(users.path).toBe('id')
@@ -368,7 +362,7 @@ describe('IndexedDBDatabase — read / write scopes', () => {
 			users: { path: 'id' },
 			posts: { path: 'id' },
 		})
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.write(['users', 'posts'], async (tx) => {
 			await tx.store('users').set({ id: 'u1', name: 'Ada' })
 			await tx.store('posts').set({ id: 'p1', author: 'u1' })
@@ -379,7 +373,7 @@ describe('IndexedDBDatabase — read / write scopes', () => {
 
 	it('rolls the whole scope back when it throws', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.store('users').set({ id: 'u1', n: 1 })
 		const caught = await db
 			.write('users', async (tx) => {
@@ -400,7 +394,7 @@ describe('IndexedDBDatabase — read / write scopes', () => {
 		// listener — proving the listener is wired BEFORE the scope runs, not
 		// after, so `write` resolves instead of hanging forever.
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.write('users', async (tx) => {
 			await tx.store('users').set({ id: 'u1', name: 'Ada' })
 			await waitForDelay(10) // non-IDB await — the transaction auto-commits here
@@ -410,7 +404,7 @@ describe('IndexedDBDatabase — read / write scopes', () => {
 
 	it('reads within a readonly scope', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.store('users').set({ id: 'u1', name: 'Ada' })
 		let found: unknown
 		await db.read('users', async (tx) => {
@@ -423,7 +417,7 @@ describe('IndexedDBDatabase — read / write scopes', () => {
 describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 	it('opens at the current version and bumps once to create a newly declared store', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		// First open, auto-managed: creates `users`, settling at version 1.
 		const first = createIndexedDBDatabase({ name, stores: { users: { path: 'id' } } })
 		await first.connect()
@@ -437,9 +431,9 @@ describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 			name,
 			stores: { users: { path: 'id' }, posts: { path: 'id' } },
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			second.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		await second.connect()
 		expect(second.version).toBe(2)
@@ -451,7 +445,7 @@ describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 
 	it('creates new stores on an explicit version upgrade', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
 		v1.close()
@@ -461,9 +455,9 @@ describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 			version: 2,
 			stores: { users: { path: 'id' }, posts: { path: 'id' } },
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			v2.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		await v2.connect()
 		expect(v2.version).toBe(2)
@@ -474,15 +468,15 @@ describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 
 	it('contains built-in schema faults across retries without partial state or orphan connections', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const seed = createIndexedDBDatabase({
 			name,
 			version: 1,
 			stores: { users: { path: 'id' } },
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			seed.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		await seed.connect()
 		await seed.store('users').set({ id: 'sentinel', value: 'preserved' })
@@ -505,9 +499,9 @@ describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 				callbackCount += 1
 			},
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			failed.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 
 		const first = failed.connect()
@@ -535,9 +529,9 @@ describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 			version: 1,
 			stores: { users: { path: 'id' } },
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			valid.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		await valid.connect()
 		expect(valid.version).toBe(1)
@@ -558,7 +552,7 @@ describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 describe('IndexedDBDatabase — upgrade hook', () => {
 	it('drops a store while leaving others intact', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({
 			name,
 			version: 1,
@@ -577,9 +571,9 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 				context.drop('posts')
 			},
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			v2.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		await v2.connect()
 		expect([...v2.database.objectStoreNames]).toEqual(['users'])
@@ -588,7 +582,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 
 	it('adds an index to an existing store via context.index', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
 		await v1.store('users').set([
@@ -605,9 +599,9 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 				context.index('users', { name: 'byName', path: 'name' })
 			},
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			v2.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		await v2.connect()
 		expect(await v2.store('users').index('byName').get('Bea')).toEqual({ id: 'u2', name: 'Bea' })
@@ -615,7 +609,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 
 	it('adds a unique index to a store created in the same upgrade via context.create', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
 		v1.close()
@@ -629,9 +623,9 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 				context.index('logs', { name: 'byMessage', path: 'message', unique: true })
 			},
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			v2.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		await v2.connect()
 
@@ -655,7 +649,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 
 	it('removes an index via context.deindex', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({
 			name,
 			version: 1,
@@ -673,9 +667,9 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 				context.deindex('users', 'byName')
 			},
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			v2.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		await v2.connect()
 		const read = v2.database.transaction(['users'], 'readonly')
@@ -685,7 +679,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 
 	it('migrates data within the upgrade transaction via context.store', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
 		await v1.store('users').set([
@@ -707,9 +701,9 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 				}
 			},
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			v2.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		await v2.connect()
 		expect(await v2.store('users').get('u1')).toEqual({ id: 'u1', name: 'ADA' })
@@ -718,7 +712,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 
 	it('rejects connect() cleanly when an async upgrade throws after an awaited request', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const failure = new Error('migration boom')
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
@@ -737,9 +731,9 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 				throw failure
 			},
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			v2.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 
 		const caught = await v2.connect().catch((error: unknown) => error)
@@ -756,9 +750,9 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			version: 1,
 			stores: { users: { path: 'id' } },
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			reopened.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		await reopened.connect()
 		expect(reopened.version).toBe(1)
@@ -768,7 +762,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 	it('preserves a synchronous undefined upgrade failure as a present cause', async () => {
 		const name = uniqueName()
 		const failure: unknown = undefined
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
 		v1.close()
@@ -781,9 +775,9 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 				throw failure
 			},
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			v2.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		const caught = await v2.connect().catch((error: unknown) => error)
 		const upgrade = caught instanceof IndexedDBError ? caught : undefined
@@ -797,7 +791,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 	it('preserves an asynchronously rejected undefined upgrade failure as a present cause', async () => {
 		const name = uniqueName()
 		const failure: unknown = undefined
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
 		v1.close()
@@ -808,9 +802,9 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			stores: { users: { path: 'id' } },
 			upgrade: () => Promise.reject(failure),
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			v2.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		const caught = await v2.connect().catch((error: unknown) => error)
 		const upgrade = caught instanceof IndexedDBError ? caught : undefined
@@ -823,7 +817,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 
 	it('creates a store via context.create, honouring its definition', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
 		v1.close()
@@ -836,9 +830,9 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 				context.create('logs', { path: 'id', increment: false })
 			},
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			v2.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		await v2.connect()
 		expect(v2.database.objectStoreNames.contains('logs')).toBe(true)
@@ -852,7 +846,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 
 	it('surfaces a typed IndexedDBError when context.drop targets a missing store', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
 		v1.close()
@@ -865,9 +859,9 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 				context.drop('missing')
 			},
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			v2.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		const caught = await v2.connect().catch((error: unknown) => error)
 		expect(caught).toBeInstanceOf(IndexedDBError)
@@ -877,7 +871,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 
 	it('surfaces a typed IndexedDBError when context.deindex targets a missing index', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
 		v1.close()
@@ -890,9 +884,9 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 				context.deindex('users', 'missing')
 			},
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			v2.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		const caught = await v2.connect().catch((error: unknown) => error)
 		expect(caught).toBeInstanceOf(IndexedDBError)
@@ -902,7 +896,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 
 	it('exposes old / version / stores correctly on the context', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
 		v1.close()
@@ -920,9 +914,9 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 				seenStores = context.stores
 			},
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			v2.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		await v2.connect()
 		expect(seenOld).toBe(1)
@@ -934,7 +928,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 describe('IndexedDBDatabase — versionchange yields a live connection', () => {
 	it('closes the first connection so a second connection at a higher version can open', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const first = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await first.connect()
 		expect(first.open).toBe(true)
@@ -944,9 +938,9 @@ describe('IndexedDBDatabase — versionchange yields a live connection', () => {
 			version: 2,
 			stores: { users: { path: 'id' }, posts: { path: 'id' } },
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			second.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		// Without the onversionchange yield, this would hang indefinitely on
 		// `onblocked` since `first` never releases its connection on its own — the
@@ -958,7 +952,7 @@ describe('IndexedDBDatabase — versionchange yields a live connection', () => {
 
 	it('lazily reconnects a yielded handle at the new version on the next operation', async () => {
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		// Auto-managed (no pinned `version`): the lazy reconnect below re-opens
 		// without a fixed version, so it naturally lands on whatever version is
 		// current — a pinned-version handle would instead throw `VersionError`
@@ -972,10 +966,10 @@ describe('IndexedDBDatabase — versionchange yields a live connection', () => {
 			version: 2,
 			stores: { users: { path: 'id' }, posts: { path: 'id' } },
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			first.close()
 			second.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		await second.connect()
 
@@ -997,7 +991,7 @@ describe('IndexedDBDatabase — versionchange yields a live connection', () => {
 describe('IndexedDBDatabase — abnormal close recovery', () => {
 	it('lazily reconnects after an external onclose fires, instead of staying invalid forever', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		await db.store('users').set({ id: 'u1', name: 'Ada' })
 		expect(db.open).toBe(true)
 
@@ -1021,7 +1015,7 @@ describe('IndexedDBDatabase — persistence and drop', () => {
 		// Open WITHOUT the shared cleanup: its cleanup deletes the database, but this
 		// test must keep the bytes on disk across the reopen below.
 		const name = uniqueName()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 		const db = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await db.store('users').set({ id: 'u1', name: 'Ada' })
 		db.close()
@@ -1032,9 +1026,9 @@ describe('IndexedDBDatabase — persistence and drop', () => {
 			version: 1,
 			stores: { users: { path: 'id' } },
 		})
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			reopened.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		expect(await reopened.store('users').get('u1')).toEqual({ id: 'u1', name: 'Ada' })
 	})
@@ -1047,9 +1041,9 @@ describe('IndexedDBDatabase — persistence and drop', () => {
 
 		// A fresh open over the same name starts empty.
 		const fresh = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
-		cleanups.push(async () => {
+		teardown.add(async () => {
 			fresh.close()
-			await deleteDatabase(name)
+			await dropDatabase(name)
 		})
 		expect(await fresh.store('users').get('u1')).toBeUndefined()
 	})

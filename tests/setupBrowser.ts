@@ -9,6 +9,9 @@ import type {
 	StoresShape,
 } from '@src/browser'
 import { createIndexedDBDatabase, IndexedDBError } from '@src/browser'
+import type { TeardownInterface } from '@orkestrel/test'
+import { waitForDelay } from '@orkestrel/test'
+import { removeDatabase } from '@orkestrel/test/browser'
 
 // ── IndexedDB test fixtures (real Chromium, real `indexedDB`) ────────────────
 //
@@ -18,21 +21,30 @@ import { createIndexedDBDatabase, IndexedDBError } from '@src/browser'
 // deletes the database — so the suite is order- and rerun-independent without a
 // per-file local opener. Each test keeps only its file-specific store / index
 // definitions, passed in as the schema.
+//
+// Deleting a database goes through {@link dropDatabase}, which composes the
+// shipped `removeDatabase` with the wait a close needs to land.
 
 /**
- * Delete an IndexedDB database, resolving once the request settles, so a test
- * can start from a clean store. Resolves even when the delete is blocked by an
- * open connection (the caller closes its databases first).
+ * Deletes an IndexedDB database after the connections closing it have finished
+ * closing, so a test can start from a clean store.
  *
  * @param name - The database name to delete
+ * @returns A promise resolving after the deletion completes
+ * @throws Thrown when the request errors, and when a connection the caller left
+ *   open blocks it
+ *
+ * @remarks
+ * Close every connection to `name` before calling this. `IDBDatabase.close`
+ * returns before the connection is gone, and `removeDatabase` reports a block as
+ * a rejection rather than waiting one out, so a delete requested in the same task
+ * as the close rejects on a connection that is already closing. The host timer
+ * here gives that close a turn to complete. Deleting a database that was never
+ * created succeeds, so this is safe as the first line of a test.
  */
-export function deleteDatabase(name: string): Promise<void> {
-	return new Promise((resolve) => {
-		const request = globalThis.indexedDB.deleteDatabase(name)
-		request.onsuccess = () => resolve()
-		request.onerror = () => resolve()
-		request.onblocked = () => resolve()
-	})
+export async function dropDatabase(name: string): Promise<void> {
+	await waitForDelay()
+	await removeDatabase(name)
 }
 
 let databaseCounter = 0
@@ -82,7 +94,7 @@ export async function createTestDatabase<const Stores extends StoresShape>(
 	await db.connect()
 	const cleanup = async (): Promise<void> => {
 		db.close()
-		await deleteDatabase(name)
+		await dropDatabase(name)
 	}
 	return { db, name, cleanup }
 }
@@ -124,46 +136,9 @@ export function errorCode(value: unknown): string | undefined {
 //
 // The near-duplicate seed-a-`users`-store openers the `src/browser` tests
 // reuse (AGENTS §16.1): each opens a uniquely-named database via
-// {@link createTestDatabase}, sets the rows, and registers its `cleanup` through the
-// caller's teardown registrar (so the file keeps its own `cleanups` array + the
-// deferred async-thunk `afterEach`). The seed returns just the connected `db`.
-
-/** Register a database cleanup with the caller's teardown — the per-file `cleanups`
- *  push, decoupled from the array so a seed helper need not know its shape. */
-export type CleanupRegistrar = (cleanup: () => Promise<void>) => void
-
-/** A teardown registrar: push disposers as a test sets them up, `run` them all in
- *  registration order. Its `push` IS a {@link CleanupRegistrar}, so a seed helper
- *  (`seedUsers` / `seedStore`) composes with `register: registrar.push`. */
-export interface CleanupRegistrarInterface {
-	/** Register a disposer (sync or async) to run at teardown. */
-	push(disposer: () => void | Promise<void>): void
-	/** Run every registered disposer once, in registration order, then forget them. */
-	run(): Promise<void>
-}
-
-/**
- * Build a teardown registrar replacing the hand-rolled per-file `cleanups[]` +
- * `afterEach` loop every `src/browser` test repeats
- * (AGENTS §16.1). Push disposers as a test opens resources; wire `registrar.run`
- * into an `afterEach`. Disposers run in REGISTRATION order — the order an
- * IndexedDB connection/transaction close can depend on — and are forgotten after,
- * so the registrar is reused across cases. `push` is a {@link CleanupRegistrar},
- * so `seedUsers(registrar.push)` / `seedStore(registrar.push)` compose directly.
- *
- * @returns A registrar with `push(disposer)` and `run()`
- */
-export function createCleanups(): CleanupRegistrarInterface {
-	const disposers: Array<() => void | Promise<void>> = []
-	return {
-		push(disposer) {
-			disposers.push(disposer)
-		},
-		async run() {
-			for (const disposer of disposers.splice(0)) await disposer()
-		},
-	}
-}
+// {@link createTestDatabase}, sets the rows, and adds its `cleanup` to the
+// caller's `createTeardown()` list (which the file destroys from an `afterEach`).
+// The seed returns just the connected `db`.
 
 /** The store schema {@link seedUsers} opens — a `users` store with a non-unique
  *  `byAge` index and a unique `byEmail` index. */
@@ -185,16 +160,16 @@ export const SEED_STORE_STORES = {
 /**
  * Seed a `users` store keyed by `id` with a non-unique `byAge` index and a unique
  * `byEmail` index, three rows spanning ages 20/30/40 — the richer index-bearing seed
- * most `IndexedDBIndex` reads need. Registers its cleanup through `register`.
+ * most `IndexedDBIndex` reads need. Adds its cleanup to `teardown`.
  *
- * @param register - Receives the database cleanup to run at teardown
+ * @param teardown - The teardown list that closes and deletes the database
  * @returns The connected database, already holding the three rows
  */
 export async function seedUsers(
-	register: CleanupRegistrar,
+	teardown: TeardownInterface,
 ): Promise<IndexedDBDatabaseInterface<typeof SEED_USER_STORES>> {
 	const { db, cleanup } = await createTestDatabase(SEED_USER_STORES)
-	register(cleanup)
+	teardown.add(cleanup)
 	await db.store('users').set([
 		{ id: 'a', age: 20, email: 'a@x.io' },
 		{ id: 'b', age: 30, email: 'b@x.io' },
@@ -206,16 +181,16 @@ export async function seedUsers(
 /**
  * Seed a plain `users` store keyed by `id` (no secondary index) with three numbered
  * rows `{ id, n }` (n = 1/2/3) — the minimal seed the `IndexedDBCursor` walks/mutates.
- * Registers its cleanup through `register`.
+ * Adds its cleanup to `teardown`.
  *
- * @param register - Receives the database cleanup to run at teardown
+ * @param teardown - The teardown list that closes and deletes the database
  * @returns The connected database, already holding the three rows
  */
 export async function seedStore(
-	register: CleanupRegistrar,
+	teardown: TeardownInterface,
 ): Promise<IndexedDBDatabaseInterface<typeof SEED_STORE_STORES>> {
 	const { db, cleanup } = await createTestDatabase(SEED_STORE_STORES)
-	register(cleanup)
+	teardown.add(cleanup)
 	await db.store('users').set([
 		{ id: 'a', n: 1 },
 		{ id: 'b', n: 2 },

@@ -1,7 +1,7 @@
 import { IndexedDBError, rangeExactKey, rangeFromKey, rangePrefix } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { captureError } from '@orkestrel/test'
-import { createCleanups, createTestDatabase, drainCursor, errorCode } from '../../setupBrowser.js'
+import { captureError, createTeardown } from '@orkestrel/test'
+import { createTestDatabase, drainCursor, errorCode } from '../../setupBrowser.js'
 
 // `IndexedDBStoreInterface` in real Chromium, reached through `db.store(name)`:
 // the metadata getters (`name` / `path` / `indexes` / `increment`), the full
@@ -11,9 +11,9 @@ import { createCleanups, createTestDatabase, drainCursor, errorCode } from '../.
 // afterwards. (Index- and cursor-specific behavior is pinned in their own files;
 // here we exercise the store as the access point.)
 
-const cleanups = createCleanups()
+const teardown = createTeardown()
 
-afterEach(cleanups.run)
+afterEach(teardown.destroy)
 
 describe('IndexedDBStore — metadata', () => {
 	it('reports its declared schema', async () => {
@@ -27,7 +27,7 @@ describe('IndexedDBStore — metadata', () => {
 			},
 			events: { increment: true },
 		})
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const users = db.store('users')
 		expect(users.name).toBe('users')
 		expect(users.path).toBe('id')
@@ -44,7 +44,7 @@ describe('IndexedDBStore — metadata', () => {
 		const { db, cleanup } = await createTestDatabase({
 			parts: { path: ['make', 'model'] },
 		})
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		expect(db.store('parts').path).toEqual(['make', 'model'])
 	})
 })
@@ -52,7 +52,7 @@ describe('IndexedDBStore — metadata', () => {
 describe('IndexedDBStore — keyed CRUD', () => {
 	it('round-trips a record; misses read as undefined / false / empty', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const users = db.store('users')
 		await users.set({ id: 'u1', name: 'Ada', age: 36 })
 		expect(await users.get('u1')).toEqual({ id: 'u1', name: 'Ada', age: 36 })
@@ -68,7 +68,7 @@ describe('IndexedDBStore — keyed CRUD', () => {
 
 	it('resolve returns the record, or throws NOT_FOUND on a miss', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const users = db.store('users')
 		await users.set({ id: 'u1' })
 		expect(await users.resolve('u1')).toEqual({ id: 'u1' })
@@ -79,7 +79,7 @@ describe('IndexedDBStore — keyed CRUD', () => {
 
 	it('set upserts (overwrites) while add rejects a duplicate with CONSTRAINT', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const users = db.store('users')
 		await users.set({ id: 'u1', name: 'Ada' })
 		await users.set({ id: 'u1', name: 'Grace' }) // upsert overwrites
@@ -94,7 +94,7 @@ describe('IndexedDBStore — keyed CRUD', () => {
 
 	it('rejects a non-cloneable value with DATA', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const users = db.store('users')
 		// A function is not structured-clonable — the native put throws
 		// DataCloneError, mapped to our DATA code.
@@ -105,7 +105,7 @@ describe('IndexedDBStore — keyed CRUD', () => {
 
 	it('lists keys and records in key order, caps with count, and clears', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const users = db.store('users')
 		await users.set([
 			{ id: 'a', n: 1 },
@@ -125,7 +125,7 @@ describe('IndexedDBStore — keyed CRUD', () => {
 describe('IndexedDBStore — array-first batch overloads', () => {
 	it('set / get / has / remove batch by the array overload', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const users = db.store('users')
 		const keys = await users.set([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
 		expect(keys).toEqual(['a', 'b', 'c'])
@@ -137,7 +137,7 @@ describe('IndexedDBStore — array-first batch overloads', () => {
 
 	it('add batches and resolve batches, throwing NOT_FOUND if any key misses', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const users = db.store('users')
 		await users.add([{ id: 'a' }, { id: 'b' }])
 		expect(await users.resolve(['a', 'b'])).toEqual([{ id: 'a' }, { id: 'b' }])
@@ -149,7 +149,7 @@ describe('IndexedDBStore — array-first batch overloads', () => {
 describe('IndexedDBStore — key strategies', () => {
 	it('supports out-of-line keys with an explicit key argument', async () => {
 		const { db, cleanup } = await createTestDatabase({ events: {} })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const events = db.store('events')
 		expect(events.path).toBeNull()
 		await events.set({ type: 'click' }, 'e1')
@@ -158,7 +158,7 @@ describe('IndexedDBStore — key strategies', () => {
 
 	it('auto-increments out-of-line keys when increment is set', async () => {
 		const { db, cleanup } = await createTestDatabase({ log: { increment: true } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const log = db.store('log')
 		const k1 = await log.set({ msg: 'first' })
 		const k2 = await log.set({ msg: 'second' })
@@ -170,7 +170,7 @@ describe('IndexedDBStore — key strategies', () => {
 
 	it('reads a single compound key via rangeExactKey', async () => {
 		const { db, cleanup } = await createTestDatabase({ parts: { path: ['make', 'model'] } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const parts = db.store('parts')
 		await parts.set([
 			{ make: 'acme', model: 'a', stock: 1 },
@@ -186,7 +186,7 @@ describe('IndexedDBStore — key strategies', () => {
 describe('IndexedDBStore — key-range reads', () => {
 	it('reads and counts over a primary-key range', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const users = db.store('users')
 		await users.set([{ id: 'user:1' }, { id: 'user:2' }, { id: 'zzz' }])
 		expect((await users.records(rangePrefix('user:'))).map((row) => row.id)).toEqual([
@@ -203,7 +203,7 @@ describe('IndexedDBStore — index and cursor access', () => {
 		const { db, cleanup } = await createTestDatabase({
 			users: { path: 'id', indexes: [{ name: 'byAge', path: 'age' }] },
 		})
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const users = db.store('users')
 		await users.set({ id: 'u1', age: 30 })
 		expect(await users.index('byAge').get(30)).toEqual({ id: 'u1', age: 30 })
@@ -215,7 +215,7 @@ describe('IndexedDBStore — index and cursor access', () => {
 
 	it('opens a cursor over the store, and null over an empty store', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
-		cleanups.push(cleanup)
+		teardown.add(cleanup)
 		const users = db.store('users')
 		expect(await users.cursor()).toBeNull()
 		await users.set([{ id: 'a' }, { id: 'b' }])
