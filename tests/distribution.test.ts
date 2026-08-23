@@ -95,6 +95,11 @@ interface Resolution {
 	readonly conditions: Readonly<Record<Format, readonly string[]>>
 }
 
+interface TargetResolution {
+	readonly target: string
+	readonly matched: boolean
+}
+
 // Each compile driver carries the conditions TypeScript applies for its resolution
 // and importing format. A `require`-only subpath therefore stays in each CommonJS
 // probe that can resolve it.
@@ -223,29 +228,52 @@ function runNode(args: readonly string[], cwd: string): SpawnSyncReturns<string>
 	return spawnSync(process.execPath, [...args], { cwd, encoding: 'utf8', windowsHide: true })
 }
 
-// Node's own condition matching, read in declaration order: a key answers when the
-// caller requested it or when it is `default`, and the first branch reaching a
-// string wins. An array is a fallback list, so its first valid resolving member wins.
-// Walking it recursively is what makes a flat entry, a condition-nested one, and a
-// fallback list the same shape here. An entry may declare `types` beside
-// `default` at its top level rather than inside `import`, and a fixed
-// `entry.import.types` lookup returns a JavaScript file there.
-function resolveTarget(entry: unknown, conditions: readonly string[]): string | undefined {
-	if (typeof entry === 'string') return entry
+// Node's own condition matching, read in declaration order. The matched bit records
+// whether the selected path traversed one caller-named condition; a `default`
+// branch can resolve for CommonJS without declaring CommonJS support, so resolution
+// alone cannot select a CommonJS consumer probe.
+function resolvePackageTarget(
+	entry: unknown,
+	conditions: readonly string[],
+	required: string | undefined,
+	matched = false,
+): TargetResolution | undefined {
+	if (typeof entry === 'string') return { target: entry, matched }
 	if (isList(entry)) {
 		for (const member of entry) {
-			const resolved = resolveTarget(member, conditions)
-			if (resolved !== undefined && isPackageTarget(resolved)) return resolved
+			const resolved = resolvePackageTarget(member, conditions, required, matched)
+			if (resolved !== undefined && isPackageTarget(resolved.target)) return resolved
 		}
 		return undefined
 	}
 	if (!isRecord(entry)) return undefined
 	for (const [condition, nested] of Object.entries(entry)) {
 		if (condition !== 'default' && !conditions.includes(condition)) continue
-		const resolved = resolveTarget(nested, conditions)
+		const resolved = resolvePackageTarget(
+			nested,
+			conditions,
+			required,
+			matched || condition === required,
+		)
 		if (resolved !== undefined) return resolved
 	}
 	return undefined
+}
+
+// A flat entry, a condition-nested entry, and a fallback list all resolve through
+// one walker. An entry may declare `types` beside `default` at its top level
+// rather than inside `import`, so a fixed `entry.import.types` lookup is not
+// equivalent to condition resolution.
+function resolveTarget(entry: unknown, conditions: readonly string[]): string | undefined {
+	return resolvePackageTarget(entry, conditions, undefined)?.target
+}
+
+// A CommonJS entry is one whose selected Node path traverses an explicit `require`
+// condition. A `default` target is deliberately insufficient: Node 22 may load an
+// ES module from require, while TypeScript correctly refuses a CommonJS consumer of
+// a package that declares no CommonJS condition.
+function resolvesCommonJS(entry: unknown): boolean {
+	return resolvePackageTarget(entry, RUNTIME_CONDITIONS.commonjs, 'require')?.matched === true
 }
 
 // Every target an entry names under any condition. A fallback list omits members
@@ -295,7 +323,11 @@ function readDeclaration(entry: unknown): Entry['declaration'] {
 
 // The entries one compile driver can resolve under its own conditions.
 function selectEntries(entries: readonly Entry[], conditions: readonly string[]): readonly Entry[] {
-	return entries.filter((entry) => resolveTarget(entry.mapping, conditions) !== undefined)
+	return entries.filter(
+		(entry) =>
+			resolveTarget(entry.mapping, conditions) !== undefined &&
+			(!conditions.includes('require') || resolvesCommonJS(entry.mapping)),
+	)
 }
 
 // The value exports a declaration publishes, read through the compiler's checker
@@ -523,7 +555,7 @@ function buildStage(): Stage {
 			continue
 		}
 		const imported = resolveTarget(entry, RUNTIME_CONDITIONS.module)
-		const commonjs = resolveTarget(entry, RUNTIME_CONDITIONS.commonjs)
+		const commonjs = resolvesCommonJS(entry)
 		const module = resolveTarget(entry, RUNTIME_CONDITIONS.browser)
 		entries.push({
 			subpath,
@@ -538,7 +570,7 @@ function buildStage(): Stage {
 			},
 			browser: module !== undefined && module.startsWith(BROWSER_OUTPUT),
 			module: imported !== undefined,
-			commonjs: commonjs !== undefined,
+			commonjs,
 		})
 	}
 	return { consumer, installed, archives, entries, subpaths, undeclared, excluded, targets }
