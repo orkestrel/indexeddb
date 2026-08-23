@@ -393,9 +393,17 @@ function selectEntries(entries: readonly Entry[], conditions: readonly string[])
 	)
 }
 
-// Require-loadable entries a typed CommonJS consumer cannot compile against.
+// Require-loadable entries that declare CommonJS support but a typed CommonJS
+// consumer cannot compile against. A default branch resolving under the require
+// condition set makes no CommonJS claim.
 function selectUntypable(entries: readonly Entry[]): readonly Entry[] {
-	return entries.filter((entry) => entry.required && !entry.commonjs)
+	return entries.filter(
+		(entry) =>
+			entry.required &&
+			isRecord(entry.mapping) &&
+			Object.hasOwn(entry.mapping, 'require') &&
+			!entry.commonjs,
+	)
 }
 
 // The value exports a declaration publishes, read through the compiler's checker
