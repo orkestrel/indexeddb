@@ -626,6 +626,11 @@ command that outlives the turn that started it. Every law here binds all of them
 - Write a multi-step chain to a script file and run the file. A chain composed inside one shell
   argument cannot be read back, corrected, or re-run, and the record of what actually ran is the
   argument text in a transcript rather than a file on disk.
+- Never edit a script file while a shell is executing it. `bash` reads a script incrementally from a
+  byte offset rather than loading it, so an edit that shifts line numbers moves the text under that
+  offset and the shell resumes mid-construct. The run dies on a syntax error in a line the script
+  does not contain, which reads as a defect in the work rather than as the edit that caused it. Copy
+  the file, edit the copy, and launch the copy for the next run.
 - On a Windows host this binds every program-carrying command, not only long ones. Heredocs,
   `node -e`, `node -p`, `&&` chaining, and any argument carrying `${...}` trip the Git Bash
   approval classifier and turn an unattended run into a manual approval prompt. Write the program
