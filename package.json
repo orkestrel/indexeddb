@@ -59,14 +59,15 @@
 		"build": "npm run clean && npm run build:src",
 		"build:src": "npm run build:src:browser",
 		"build:src:browser": "vite build --config configs/src/vite.browser.config.ts",
-		"prepublishOnly": "npm run format:check && npm run lint:check && npm run check && npm run build && npm test"
+		"prepublishOnly": "npm run format:check && npm run lint:check && npm run check && npm run build && npm test && npm run test:distribution -- --mode release",
+		"test:distribution": "vitest run --config vite.config.ts --no-cache --reporter=dot --project distribution"
 	},
 	"dependencies": {
 		"@orkestrel/contract": "^0.0.13"
 	},
 	"devDependencies": {
 		"@microsoft/api-extractor": "^7.59.0",
-		"@orkestrel/guide": "^0.0.12",
+		"@orkestrel/guide": "^0.0.13",
 		"@orkestrel/probe": "^0.0.3",
 		"@orkestrel/scaffold": "^0.0.49",
 		"@orkestrel/test": "^0.0.11",
