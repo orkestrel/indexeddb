@@ -16,6 +16,7 @@ import {
 	readdirSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from 'node:fs'
 import { createServer } from 'node:http'
@@ -73,12 +74,9 @@ type Format = 'module' | 'commonjs'
 // client build enables its module and browser conditions.
 const RUNTIME_CONDITIONS = Object.freeze({
 	module: Object.freeze(['node-addons', 'node', 'import', 'module-sync']),
+	commonjs: Object.freeze(['node-addons', 'node', 'require', 'module-sync']),
 	browser: Object.freeze(['module', 'browser', 'production', 'import']),
 })
-// The conditions Node's require resolver uses to decide whether the CommonJS
-// runtime drive has a target. Declaration format separately decides whether the
-// typed CommonJS compile probe includes the entry.
-const COMMONJS_CONDITIONS = Object.freeze(['node', 'require'])
 // TypeScript's Node resolutions add `node` to the format condition. Its bundler
 // resolution does not, so a browser drive compares against the declaration a bundler
 // consumer reads rather than borrowing the Node declaration.
@@ -262,14 +260,61 @@ function resolveTarget(entry: unknown, conditions: readonly string[]): string | 
 	return resolvePackageTarget(entry, conditions)?.target
 }
 
+// Whether a path is a physical file. TypeScript's file-existence check refuses a
+// directory at the same spelling and continues to the outer package scope.
+function matchesFile(path: string): boolean {
+	try {
+		return statSync(path).isFile()
+	} catch {
+		return false
+	}
+}
+
+// TypeScript resolves a declaration target by accepting an existing declaration
+// directly or by substituting beside a JavaScript target. A missing target leaves
+// the containing condition or fallback list unresolved, so the walk continues.
+function targetToDeclaration(target: string, installed: string): string | undefined {
+	if (!isPackageTarget(target)) return undefined
+	let declaration = target
+	if (target.endsWith('.cjs')) declaration = `${target.slice(0, -4)}.d.cts`
+	else if (target.endsWith('.mjs')) declaration = `${target.slice(0, -4)}.d.mts`
+	else if (target.endsWith('.js')) declaration = `${target.slice(0, -3)}.d.ts`
+	else if (!isDeclaration(target)) return undefined
+	return matchesFile(join(installed, declaration)) ? declaration : undefined
+}
+
+// The declaration TypeScript resolves through one importing format's conditions.
+// Condition objects keep manifest order, and arrays keep fallback order.
+function resolveDeclaration(
+	entry: unknown,
+	conditions: readonly string[],
+	installed: string,
+): string | undefined {
+	if (typeof entry === 'string') return targetToDeclaration(entry, installed)
+	if (isList(entry)) {
+		for (const member of entry) {
+			const resolved = resolveDeclaration(member, conditions, installed)
+			if (resolved !== undefined) return resolved
+		}
+		return undefined
+	}
+	if (!isRecord(entry)) return undefined
+	for (const [condition, nested] of Object.entries(entry)) {
+		if (condition !== 'default' && !conditions.includes(condition)) continue
+		const resolved = resolveDeclaration(nested, conditions, installed)
+		if (resolved !== undefined) return resolved
+	}
+	return undefined
+}
+
 // The nearest package scope that decides a `.d.ts` declaration's module format. A
-// nested manifest starts a scope even when it omits `type` or cannot be parsed, so
-// the walk stops there rather than borrowing the installed root's declaration.
+// physical nested manifest starts a scope even when it omits `type` or cannot be
+// parsed. A directory at that spelling is not a manifest, so the walk continues.
 function readPackageType(installed: string, target: string): unknown {
 	let directory = dirname(join(installed, target))
 	while (true) {
 		const path = join(directory, 'package.json')
-		if (existsSync(path)) {
+		if (matchesFile(path)) {
 			try {
 				const manifest = readJson(path)
 				return isRecord(manifest) ? manifest.type : undefined
@@ -289,7 +334,7 @@ function readPackageType(installed: string, target: string): unknown {
 // declaration refuses. A `.d.ts` declaration takes its own nearest package scope.
 // Runtime target format remains the runtime drive's separate question.
 function resolvesCommonJS(entry: unknown, installed: string): boolean {
-	const declaration = resolveTarget(entry, DECLARATION_CONDITIONS.commonjs)
+	const declaration = resolveDeclaration(entry, DECLARATION_CONDITIONS.commonjs, installed)
 	if (declaration === undefined) return false
 	if (declaration.endsWith('.d.cts')) return true
 	if (declaration.endsWith('.d.mts')) return false
@@ -329,15 +374,13 @@ function isDeclaration(target: string): boolean {
 
 // The declarations the Node module, Node CommonJS, and browser drives compare
 // against. Each field uses the conditions of the TypeScript consumer paired with
-// that runtime, and a JavaScript fallback resolves to absence rather than types.
-function readDeclaration(entry: unknown): Entry['declaration'] {
-	const module = resolveTarget(entry, DECLARATION_CONDITIONS.module)
-	const commonjs = resolveTarget(entry, DECLARATION_CONDITIONS.commonjs)
-	const browser = resolveTarget(entry, DECLARATION_CONDITIONS.browser)
+// that runtime. A JavaScript target resolves through TypeScript's adjacent
+// declaration substitution rather than standing in for the declaration itself.
+function readDeclaration(entry: unknown, installed: string): Entry['declaration'] {
 	return {
-		module: module !== undefined && isDeclaration(module) ? module : undefined,
-		commonjs: commonjs !== undefined && isDeclaration(commonjs) ? commonjs : undefined,
-		browser: browser !== undefined && isDeclaration(browser) ? browser : undefined,
+		module: resolveDeclaration(entry, DECLARATION_CONDITIONS.module, installed),
+		commonjs: resolveDeclaration(entry, DECLARATION_CONDITIONS.commonjs, installed),
+		browser: resolveDeclaration(entry, DECLARATION_CONDITIONS.browser, installed),
 	}
 }
 
@@ -348,6 +391,11 @@ function selectEntries(entries: readonly Entry[], conditions: readonly string[])
 			resolveTarget(entry.mapping, conditions) !== undefined &&
 			(!conditions.includes('require') || entry.commonjs),
 	)
+}
+
+// Require-loadable entries a typed CommonJS consumer cannot compile against.
+function selectUntypable(entries: readonly Entry[]): readonly Entry[] {
+	return entries.filter((entry) => entry.required && !entry.commonjs)
 }
 
 // The value exports a declaration publishes, read through the compiler's checker
@@ -559,7 +607,7 @@ function buildStage(): Stage {
 		const files = collectTargets(entry)
 		targets.push(...files)
 		subpaths.push(subpath)
-		const declaration = readDeclaration(entry)
+		const declaration = readDeclaration(entry, installed)
 		// A subpath resolving no declaration is partitioned rather than dropped. It is a
 		// defect when a runtime loads one of its targets for names, because a consumer
 		// importing it compiles against nothing under `node16`. It is an excluded
@@ -576,7 +624,7 @@ function buildStage(): Stage {
 		}
 		const imported = resolveTarget(entry, RUNTIME_CONDITIONS.module)
 		const commonjs = resolvesCommonJS(entry, installed)
-		const required = resolveTarget(entry, COMMONJS_CONDITIONS) !== undefined
+		const required = resolveTarget(entry, RUNTIME_CONDITIONS.commonjs) !== undefined
 		const module = resolveTarget(entry, RUNTIME_CONDITIONS.browser)
 		entries.push({
 			subpath,
@@ -678,6 +726,8 @@ describe('installed package consumer', () => {
 			(entry) => !entry.module && !entry.required && !entry.browser,
 		)
 		expect(unreachable.map((entry) => entry.subpath)).toStrictEqual([])
+		const untypable = selectUntypable(stage.entries)
+		expect(untypable.map((entry) => entry.subpath)).toStrictEqual([])
 	})
 
 	it('refuses a subpath its exports map does not name [requires the registry]', (context) => {
