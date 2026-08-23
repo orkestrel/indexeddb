@@ -67,16 +67,17 @@ const ADDON_EXTENSION = '.node'
 const DECLARATION_EXTENSIONS = ['.d.ts', '.d.cts', '.d.mts']
 type Format = 'module' | 'commonjs'
 
-// Each runtime target is resolved with the conditions its driver supplies. Node
-// enables its platform, addon, and synchronous-module conditions. Vite's production
-// client build enables its module and browser conditions instead.
+// The Node import target is resolved with the conditions that driver supplies. The
+// CommonJS compile probe is selected from its declaration's format, and its runtime
+// drive loads the same subpath through Node's require resolver. Vite's production
+// client build enables its module and browser conditions.
 const RUNTIME_CONDITIONS = Object.freeze({
 	module: Object.freeze(['node-addons', 'node', 'import', 'module-sync']),
-	commonjs: Object.freeze(['node-addons', 'node', 'require', 'module-sync']),
 	browser: Object.freeze(['module', 'browser', 'production', 'import']),
 })
-// TypeScript's CommonJS consumer conditions without `types`, so the target is the
-// runtime module whose format the consumer receives rather than its declaration.
+// The conditions Node's require resolver uses to decide whether the CommonJS
+// runtime drive has a target. Declaration format separately decides whether the
+// typed CommonJS compile probe includes the entry.
 const COMMONJS_CONDITIONS = Object.freeze(['node', 'require'])
 // TypeScript's Node resolutions add `node` to the format condition. Its bundler
 // resolution does not, so a browser drive compares against the declaration a bundler
@@ -146,6 +147,7 @@ interface Entry {
 	readonly browser: boolean
 	readonly module: boolean
 	readonly commonjs: boolean
+	readonly required: boolean
 }
 
 // The installed tree every claim is read from. Every subpath the exports map names
@@ -260,16 +262,20 @@ function resolveTarget(entry: unknown, conditions: readonly string[]): string | 
 	return resolvePackageTarget(entry, conditions)?.target
 }
 
-// The nearest package scope that decides a `.js` target's module format. A nested
-// manifest starts a scope even when it omits `type`, so the walk stops at the first
-// manifest rather than borrowing the installed root's declaration.
+// The nearest package scope that decides a `.d.ts` declaration's module format. A
+// nested manifest starts a scope even when it omits `type` or cannot be parsed, so
+// the walk stops there rather than borrowing the installed root's declaration.
 function readPackageType(installed: string, target: string): unknown {
 	let directory = dirname(join(installed, target))
 	while (true) {
 		const path = join(directory, 'package.json')
 		if (existsSync(path)) {
-			const manifest = readJson(path)
-			return isRecord(manifest) ? manifest.type : undefined
+			try {
+				const manifest = readJson(path)
+				return isRecord(manifest) ? manifest.type : undefined
+			} catch {
+				return undefined
+			}
 		}
 		if (directory === installed) return undefined
 		const parent = dirname(directory)
@@ -278,20 +284,16 @@ function readPackageType(installed: string, target: string): unknown {
 	}
 }
 
-// Whether the runtime target selected by a typed CommonJS consumer can enter its
-// compile and require drives. The CommonJS, JSON, addon, and extensionless handlers
-// are accepted; `.mjs` and other targets are not. A `.js` target takes its nearest
-// package scope instead of the installed root's scope.
+// Whether the declaration selected by a typed CommonJS consumer admits that entry
+// to its compile probe. A `.d.cts` declaration admits and a `.d.mts`
+// declaration refuses. A `.d.ts` declaration takes its own nearest package scope.
+// Runtime target format remains the runtime drive's separate question.
 function resolvesCommonJS(entry: unknown, installed: string): boolean {
-	const target = resolveTarget(entry, COMMONJS_CONDITIONS)
-	if (target === undefined || !isPackageTarget(target)) return false
-	const name = target.slice(target.lastIndexOf('/') + 1)
-	const dot = name.lastIndexOf('.')
-	if (dot === -1) return true
-	const extension = name.slice(dot)
-	if (extension === '.cjs' || extension === '.json' || extension === ADDON_EXTENSION) return true
-	if (extension === '.js') return readPackageType(installed, target) !== 'module'
-	return false
+	const declaration = resolveTarget(entry, DECLARATION_CONDITIONS.commonjs)
+	if (declaration === undefined) return false
+	if (declaration.endsWith('.d.cts')) return true
+	if (declaration.endsWith('.d.mts')) return false
+	return declaration.endsWith('.d.ts') && readPackageType(installed, declaration) !== 'module'
 }
 
 // Every target an entry names under any condition. A fallback list omits members
@@ -574,6 +576,7 @@ function buildStage(): Stage {
 		}
 		const imported = resolveTarget(entry, RUNTIME_CONDITIONS.module)
 		const commonjs = resolvesCommonJS(entry, installed)
+		const required = resolveTarget(entry, COMMONJS_CONDITIONS) !== undefined
 		const module = resolveTarget(entry, RUNTIME_CONDITIONS.browser)
 		entries.push({
 			subpath,
@@ -589,6 +592,7 @@ function buildStage(): Stage {
 			browser: module !== undefined && module.startsWith(BROWSER_OUTPUT),
 			module: imported !== undefined,
 			commonjs,
+			required,
 		})
 	}
 	return { consumer, installed, archives, entries, subpaths, undeclared, excluded, targets }
@@ -671,7 +675,7 @@ describe('installed package consumer', () => {
 		// loads it. Each later drive retires itself for that entry, so this assertion names
 		// the subpath rather than counting it as driven.
 		const unreachable = stage.entries.filter(
-			(entry) => !entry.module && !entry.commonjs && !entry.browser,
+			(entry) => !entry.module && !entry.required && !entry.browser,
 		)
 		expect(unreachable.map((entry) => entry.subpath)).toStrictEqual([])
 	})
@@ -729,7 +733,7 @@ for (const entry of STAGE?.entries ?? []) {
 			},
 		)
 
-		it.runIf(!entry.browser && entry.commonjs)(
+		it.runIf(!entry.browser && entry.required)(
 			'publishes what it declares to a Node require, and no more',
 			(context) => {
 				const declaration = entry.declaration.commonjs
