@@ -11,7 +11,6 @@ import type {
 import { createIndexedDBDatabase, IndexedDBError } from '@src/browser'
 import type { TeardownInterface } from '@orkestrel/test'
 import { waitForDelay } from '@orkestrel/test'
-import { removeDatabase } from '@orkestrel/test/browser'
 
 // ── IndexedDB test fixtures (real Chromium, real `indexedDB`) ────────────────
 //
@@ -22,8 +21,8 @@ import { removeDatabase } from '@orkestrel/test/browser'
 // per-file local opener. Each test keeps only its file-specific store / index
 // definitions, passed in as the schema.
 //
-// Deleting a database goes through {@link dropDatabase}, which composes the
-// shipped `removeDatabase` with the wait a close needs to land.
+// Deleting a database goes through {@link dropDatabase}, which drives the native
+// delete request itself after the wait a close needs to land.
 
 /**
  * Deletes an IndexedDB database after the connections closing it have finished
@@ -36,15 +35,35 @@ import { removeDatabase } from '@orkestrel/test/browser'
  *
  * @remarks
  * Close every connection to `name` before calling this. `IDBDatabase.close`
- * returns before the connection is gone, and `removeDatabase` reports a block as
- * a rejection rather than waiting one out, so a delete requested in the same task
- * as the close rejects on a connection that is already closing. The host timer
- * here gives that close a turn to complete. Deleting a database that was never
- * created succeeds, so this is safe as the first line of a test.
+ * returns before the connection is gone, and a block is reported as a rejection
+ * rather than waited out, so a delete requested in the same task as the close
+ * rejects on a connection that is already closing. The host timer here gives that
+ * close a turn to complete. Deleting a database that was never created succeeds,
+ * so this is safe as the first line of a test.
+ *
+ * The native request is driven here rather than through `removeDatabase` from
+ * `@orkestrel/test/browser`, which is the same contract: that module loads
+ * `vitest/browser`, which throws on import outside Browser Mode, so importing it
+ * puts this whole file out of reach of the Node-hosted `setup` project and leaves
+ * `tests/setupBrowser.test.ts` unable to prove any of the module. The resolve and
+ * reject conditions and their messages match that helper exactly.
+ *
+ * A block stays a rejection and is never absorbed. `blocked` fires while another
+ * connection is open, so a suite that swallowed it would let the next test read
+ * the previous test's records through a database reporting itself deleted.
  */
 export async function dropDatabase(name: string): Promise<void> {
 	await waitForDelay()
-	await removeDatabase(name)
+	await new Promise<void>((resolve, reject) => {
+		const request = globalThis.indexedDB.deleteDatabase(name)
+		request.addEventListener('success', () => resolve())
+		request.addEventListener('error', () => {
+			reject(new Error(`IndexedDB database "${name}" could not be deleted`))
+		})
+		request.addEventListener('blocked', () => {
+			reject(new Error(`IndexedDB database "${name}" is blocked by an open connection`))
+		})
+	})
 }
 
 let databaseCounter = 0
