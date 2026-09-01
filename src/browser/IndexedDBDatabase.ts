@@ -116,14 +116,14 @@ export class IndexedDBDatabase<
 
 	read(
 		stores: (keyof Stores & string) | ReadonlyArray<keyof Stores & string>,
-		scope: (tx: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
+		scope: (transaction: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
 	): Promise<void> {
 		return this.#run('readonly', stores, scope)
 	}
 
 	write(
 		stores: (keyof Stores & string) | ReadonlyArray<keyof Stores & string>,
-		scope: (tx: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
+		scope: (transaction: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
 	): Promise<void> {
 		return this.#run('readwrite', stores, scope)
 	}
@@ -152,24 +152,24 @@ export class IndexedDBDatabase<
 	async #run(
 		mode: IDBTransactionMode,
 		stores: (keyof Stores & string) | ReadonlyArray<keyof Stores & string>,
-		scope: (tx: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
+		scope: (transaction: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
 	): Promise<void> {
 		const database = await this.connect()
 		const names = isArray<string>(stores) ? [...stores] : [stores]
 		const native = guardSync(() => database.transaction(names, mode))
-		const tx = new IndexedDBTransaction<Stores>(native)
+		const wrapper = new IndexedDBTransaction<Stores>(native)
 		// Attach the completion listeners BEFORE invoking `scope` — a scope that
 		// ends on a trailing non-IDB `await` lets the transaction auto-commit, and
 		// `complete` can fire before a listener attached only after `scope` returns
 		// would ever be wired, hanging this call forever.
 		const settled = promisifyTransaction(native)
 		try {
-			await scope(tx)
+			await scope(wrapper)
 			await settled
 		} catch (error) {
-			if (tx.active) {
+			if (wrapper.active) {
 				try {
-					tx.abort()
+					wrapper.abort()
 				} catch {
 					// Already settled by the native transaction — nothing to roll back.
 				}

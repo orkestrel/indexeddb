@@ -60,17 +60,17 @@ export class IndexedDBCursor implements IndexedDBCursorInterface {
 			if (key === undefined) this.#cursor.continue()
 			else this.#cursor.continue(key)
 		})
-		return this.#advance()
+		return this.#next()
 	}
 
 	async seek(key: IDBValidKey, primary: IDBValidKey): Promise<IndexedDBCursorInterface | null> {
 		guardSync(() => this.#cursor.continuePrimaryKey(key, primary))
-		return this.#advance()
+		return this.#next()
 	}
 
 	async advance(count: number): Promise<IndexedDBCursorInterface | null> {
 		guardSync(() => this.#cursor.advance(count))
-		return this.#advance()
+		return this.#next()
 	}
 
 	async update(value: Row): Promise<IDBValidKey> {
@@ -84,7 +84,7 @@ export class IndexedDBCursor implements IndexedDBCursorInterface {
 	}
 
 	// Await the shared request after a move, wrapping the next position (or null).
-	async #advance(): Promise<IndexedDBCursorInterface | null> {
+	async #next(): Promise<IndexedDBCursorInterface | null> {
 		const next = await promisifyRequest(this.#request)
 		return next ? new IndexedDBCursor(next, this.#request) : null
 	}

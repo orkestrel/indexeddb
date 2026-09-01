@@ -22,7 +22,8 @@ export class IndexedDBTransaction<
 > implements IndexedDBTransactionInterface<Stores> {
 	readonly #transaction: IDBTransaction
 	readonly #stores: readonly string[]
-	#active = true
+	// The single settled fact: `active` is its complement, derived rather than
+	// stored, so the two cannot drift apart.
 	#finished = false
 
 	constructor(transaction: IDBTransaction) {
@@ -50,7 +51,7 @@ export class IndexedDBTransaction<
 	}
 
 	get active(): boolean {
-		return this.#active
+		return !this.#finished
 	}
 
 	get finished(): boolean {
@@ -68,7 +69,7 @@ export class IndexedDBTransaction<
 				`Store '${name}' is outside this transaction's scope (${this.#stores.join(', ')})`,
 			)
 		}
-		if (!this.#active) {
+		if (this.#finished) {
 			throw new IndexedDBError(
 				'ABORTED',
 				`Transaction over ${this.#stores.join(', ')} is no longer active`,
@@ -86,7 +87,6 @@ export class IndexedDBTransaction<
 			throw new IndexedDBError('INACTIVE', 'Cannot abort an already-finished transaction')
 		}
 		guardSync(() => this.#transaction.abort())
-		this.#active = false
 		this.#finished = true
 	}
 
@@ -98,7 +98,6 @@ export class IndexedDBTransaction<
 	}
 
 	#settle(): void {
-		this.#active = false
 		this.#finished = true
 	}
 }

@@ -15,14 +15,15 @@ import type { IndexedDBErrorCode } from './types.js'
  * Carries an {@link IndexedDBErrorCode} and the originating native error as the
  * standard `cause`. Construct it directly for wrapper-lifecycle faults; the
  * internal `wrapError` maps a native `DOMException` to the right code at the
- * request boundary. Narrow a caught value with `instanceof IndexedDBError`.
+ * request boundary. Narrow a caught value with {@link isIndexedDBError}, this
+ * package's own guard.
  *
  * @example
  * ```ts
  * try {
  * 	await store.add(row)
  * } catch (error) {
- * 	if (error instanceof IndexedDBError && error.code === 'CONSTRAINT') await store.set(row)
+ * 	if (isIndexedDBError(error) && error.code === 'CONSTRAINT') await store.set(row)
  * }
  * ```
  */

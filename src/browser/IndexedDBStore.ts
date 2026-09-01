@@ -9,16 +9,9 @@ import type {
 	StoreDefinition,
 } from './types.js'
 import { IndexedDBError } from './errors.js'
-import {
-	guardSync,
-	hasKey,
-	promisifyRequest,
-	promisifyTransaction,
-	readRecord,
-	readRecords,
-} from './helpers.js'
-import { IndexedDBCursor } from './IndexedDBCursor.js'
+import { guardSync, promisifyTransaction } from './helpers.js'
 import { IndexedDBIndex } from './IndexedDBIndex.js'
+import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
 
 /**
  * An object store — the full keyed CRUD surface plus index, count, and cursor
@@ -28,7 +21,10 @@ import { IndexedDBIndex } from './IndexedDBIndex.js'
  * Reached through `database.store(name)`. Each call runs in its own implicit
  * transaction (`readonly` for reads, `readwrite` for writes), awaiting completion
  * so writes are durable on return; for atomic multi-operation work use the
- * database's `read` / `write`. The keyed verbs batch by their array overload — and
+ * database's `read` / `write`. The CRUD verbs themselves are the shared
+ * {@link IndexedDBTransactionStore} engine — this class opens the implicit
+ * transaction, delegates the verb to a transaction-bound store over it, and awaits
+ * the transaction on a write. The keyed verbs batch by their array overload — and
  * those overloads are declared first, because an array is itself both a record and
  * a compound `IDBValidKey`, so the array signature must take precedence to read as
  * a batch (AGENTS §9.2). Pass `rangeExactKey([…])` to `records` / `count` to act on a
@@ -66,34 +62,30 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 	async get(
 		keyOrKeys: IDBValidKey | readonly IDBValidKey[],
 	): Promise<Row | undefined | ReadonlyArray<Row | undefined>> {
-		const store = await this.#store('readonly')
-		if (isArray<IDBValidKey>(keyOrKeys)) {
-			return Promise.all(keyOrKeys.map((key) => readRecord(store, key)))
-		}
-		return readRecord(store, keyOrKeys)
+		const engine = await this.#engine('readonly')
+		if (isArray<IDBValidKey>(keyOrKeys)) return engine.get(keyOrKeys)
+		return engine.get(keyOrKeys)
 	}
 
 	resolve(keys: readonly IDBValidKey[]): Promise<readonly Row[]>
 	resolve(key: IDBValidKey): Promise<Row>
 	async resolve(keyOrKeys: IDBValidKey | readonly IDBValidKey[]): Promise<Row | readonly Row[]> {
-		const store = await this.#store('readonly')
-		if (isArray<IDBValidKey>(keyOrKeys)) {
-			return Promise.all(keyOrKeys.map((key) => this.#resolve(store, key)))
-		}
-		return this.#resolve(store, keyOrKeys)
+		const engine = await this.#engine('readonly')
+		if (isArray<IDBValidKey>(keyOrKeys)) return engine.resolve(keyOrKeys)
+		return engine.resolve(keyOrKeys)
 	}
 
 	async records(query?: IDBKeyRange | IDBValidKey | null, count?: number): Promise<readonly Row[]> {
-		const store = await this.#store('readonly')
-		return readRecords(store, query, count)
+		const engine = await this.#engine('readonly')
+		return engine.records(query, count)
 	}
 
 	async keys(
 		query?: IDBKeyRange | IDBValidKey | null,
 		count?: number,
 	): Promise<readonly IDBValidKey[]> {
-		const store = await this.#store('readonly')
-		return promisifyRequest(guardSync(() => store.getAllKeys(query ?? undefined, count)))
+		const engine = await this.#engine('readonly')
+		return engine.keys(query, count)
 	}
 
 	has(keys: readonly IDBValidKey[]): Promise<readonly boolean[]>
@@ -101,16 +93,14 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 	async has(
 		keyOrKeys: IDBValidKey | readonly IDBValidKey[],
 	): Promise<boolean | readonly boolean[]> {
-		const store = await this.#store('readonly')
-		if (isArray<IDBValidKey>(keyOrKeys)) {
-			return Promise.all(keyOrKeys.map((key) => hasKey(store, key)))
-		}
-		return hasKey(store, keyOrKeys)
+		const engine = await this.#engine('readonly')
+		if (isArray<IDBValidKey>(keyOrKeys)) return engine.has(keyOrKeys)
+		return engine.has(keyOrKeys)
 	}
 
 	async count(query?: IDBKeyRange | IDBValidKey | null): Promise<number> {
-		const store = await this.#store('readonly')
-		return promisifyRequest(guardSync(() => store.count(query ?? undefined)))
+		const engine = await this.#engine('readonly')
+		return engine.count(query)
 	}
 
 	set(values: readonly Row[]): Promise<readonly IDBValidKey[]>
@@ -119,20 +109,11 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 		valueOrValues: Row | readonly Row[],
 		key?: IDBValidKey,
 	): Promise<IDBValidKey | readonly IDBValidKey[]> {
-		const store = await this.#store('readwrite')
-		if (isArray<Row>(valueOrValues)) {
-			const keys = await Promise.all(
-				valueOrValues.map((value) => promisifyRequest(guardSync(() => store.put(value)))),
-			)
-			await promisifyTransaction(store.transaction)
-			return keys
-		}
-		const written = await promisifyRequest(
-			guardSync(() =>
-				key === undefined ? store.put(valueOrValues) : store.put(valueOrValues, key),
-			),
-		)
-		await promisifyTransaction(store.transaction)
+		const engine = await this.#engine('readwrite')
+		const written = isArray<Row>(valueOrValues)
+			? await engine.set(valueOrValues)
+			: await engine.set(valueOrValues, key)
+		await promisifyTransaction(engine.store.transaction)
 		return written
 	}
 
@@ -142,41 +123,27 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 		valueOrValues: Row | readonly Row[],
 		key?: IDBValidKey,
 	): Promise<IDBValidKey | readonly IDBValidKey[]> {
-		const store = await this.#store('readwrite')
-		if (isArray<Row>(valueOrValues)) {
-			const keys = await Promise.all(
-				valueOrValues.map((value) => promisifyRequest(guardSync(() => store.add(value)))),
-			)
-			await promisifyTransaction(store.transaction)
-			return keys
-		}
-		const written = await promisifyRequest(
-			guardSync(() =>
-				key === undefined ? store.add(valueOrValues) : store.add(valueOrValues, key),
-			),
-		)
-		await promisifyTransaction(store.transaction)
+		const engine = await this.#engine('readwrite')
+		const written = isArray<Row>(valueOrValues)
+			? await engine.add(valueOrValues)
+			: await engine.add(valueOrValues, key)
+		await promisifyTransaction(engine.store.transaction)
 		return written
 	}
 
 	remove(keys: readonly IDBValidKey[]): Promise<void>
 	remove(key: IDBValidKey): Promise<void>
 	async remove(keyOrKeys: IDBValidKey | readonly IDBValidKey[]): Promise<void> {
-		const store = await this.#store('readwrite')
-		if (isArray<IDBValidKey>(keyOrKeys)) {
-			await Promise.all(
-				keyOrKeys.map((key) => promisifyRequest(guardSync(() => store.delete(key)))),
-			)
-		} else {
-			await promisifyRequest(guardSync(() => store.delete(keyOrKeys)))
-		}
-		await promisifyTransaction(store.transaction)
+		const engine = await this.#engine('readwrite')
+		if (isArray<IDBValidKey>(keyOrKeys)) await engine.remove(keyOrKeys)
+		else await engine.remove(keyOrKeys)
+		await promisifyTransaction(engine.store.transaction)
 	}
 
 	async clear(): Promise<void> {
-		const store = await this.#store('readwrite')
-		await promisifyRequest(guardSync(() => store.clear()))
-		await promisifyTransaction(store.transaction)
+		const engine = await this.#engine('readwrite')
+		await engine.clear()
+		await promisifyTransaction(engine.store.transaction)
 	}
 
 	index(name: string): IndexedDBIndexInterface {
@@ -191,28 +158,16 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 	}
 
 	async cursor(options?: CursorOptions): Promise<IndexedDBCursorInterface | null> {
-		const store = await this.#store('readwrite')
-		const request = guardSync(() =>
-			store.openCursor(options?.query ?? null, options?.direction ?? 'next'),
-		)
-		const cursor = await promisifyRequest(request)
-		return cursor ? new IndexedDBCursor(cursor, request) : null
+		const engine = await this.#engine('readwrite')
+		return engine.cursor(options)
 	}
 
-	// Open this object store in a fresh transaction of the given mode.
-	async #store(mode: IDBTransactionMode): Promise<IDBObjectStore> {
+	// Open this object store in a fresh transaction of the given mode, bound to the
+	// shared transaction-store engine every verb above delegates to.
+	async #engine(mode: IDBTransactionMode): Promise<IndexedDBTransactionStore> {
 		const database = await this.#connect()
-		return guardSync(() => database.transaction([this.#name], mode).objectStore(this.#name))
-	}
-
-	async #resolve(store: IDBObjectStore, key: IDBValidKey): Promise<Row> {
-		const value = await readRecord(store, key)
-		if (value === undefined) {
-			throw new IndexedDBError(
-				'NOT_FOUND',
-				`No record in store '${this.#name}' for key ${String(key)}`,
-			)
-		}
-		return value
+		return new IndexedDBTransactionStore(
+			guardSync(() => database.transaction([this.#name], mode).objectStore(this.#name)),
+		)
 	}
 }

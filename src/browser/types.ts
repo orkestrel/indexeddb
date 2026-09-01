@@ -351,8 +351,9 @@ export interface IndexedDBTransactionStoreInterface {
  * Obtained through the `scope` callback of the database's `read` / `write`. `store`
  * reaches a typed, transaction-bound store; the transaction commits automatically
  * when the scope resolves, or rolls back if it throws or `abort` is called.
- * `active` is true while it still accepts operations; `finished` is true after
- * commit or abort.
+ * `active` and `finished` are complements over one settled fact, not two
+ * independent ones: `active` is true while the transaction still accepts
+ * operations, and `finished` is true after commit or abort.
  */
 export interface IndexedDBTransactionInterface<Stores extends StoresShape = StoresShape> {
 	readonly transaction: IDBTransaction
@@ -393,11 +394,11 @@ export interface IndexedDBDatabaseInterface<Stores extends StoresShape = StoresS
 	store<K extends keyof Stores & string>(name: K): IndexedDBStoreInterface
 	read(
 		stores: (keyof Stores & string) | ReadonlyArray<keyof Stores & string>,
-		scope: (tx: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
+		scope: (transaction: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
 	): Promise<void>
 	write(
 		stores: (keyof Stores & string) | ReadonlyArray<keyof Stores & string>,
-		scope: (tx: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
+		scope: (transaction: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
 	): Promise<void>
 	close(): void
 	drop(): Promise<void>
