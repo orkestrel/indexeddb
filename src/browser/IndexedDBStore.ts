@@ -14,8 +14,8 @@ import { IndexedDBIndex } from './IndexedDBIndex.js'
 import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
 
 /**
- * An object store — the full keyed CRUD surface plus index, count, and cursor
- * access.
+ * Represents an object store — the full keyed CRUD surface plus index, count, and
+ * cursor access.
  *
  * @remarks
  * Reached through `database.store(name)`. Each call runs in its own implicit

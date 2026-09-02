@@ -3,7 +3,7 @@ import type { IndexedDBCursorInterface, Row } from './types.js'
 import { guardSync, promisifyRequest } from './helpers.js'
 
 /**
- * A promisified value cursor over an object store or index.
+ * Represents a promisified value cursor over an object store or index.
  *
  * @remarks
  * Wraps `IDBCursorWithValue` and the request that drives it. The position

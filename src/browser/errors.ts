@@ -9,7 +9,7 @@
 import type { IndexedDBErrorCode } from './types.js'
 
 /**
- * An error thrown by the IndexedDB wrapper.
+ * Represents an error thrown by the IndexedDB wrapper.
  *
  * @remarks
  * Carries an {@link IndexedDBErrorCode} and the originating native error as the
@@ -38,10 +38,10 @@ export class IndexedDBError extends Error {
 }
 
 /**
- * Whether a value is an {@link IndexedDBError}.
+ * Checks whether a value is an {@link IndexedDBError}.
  *
  * @param value - The value to test
- * @returns `true` when `value` is an `IndexedDBError`
+ * @returns True if `value` is an `IndexedDBError`; false otherwise
  */
 export function isIndexedDBError(value: unknown): value is IndexedDBError {
 	return value instanceof IndexedDBError

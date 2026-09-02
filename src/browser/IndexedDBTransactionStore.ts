@@ -10,7 +10,7 @@ import { guardSync, hasKey, promisifyRequest, readRecord, readRecords } from './
 import { IndexedDBCursor } from './IndexedDBCursor.js'
 
 /**
- * An object store bound to an explicit transaction.
+ * Represents an object store bound to an explicit transaction.
  *
  * @remarks
  * The same CRUD surface as a standalone store, but every call runs in the owning

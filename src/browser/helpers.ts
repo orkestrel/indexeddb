@@ -14,21 +14,21 @@ import { IndexedDBError } from './errors.js'
 // with `isRecord` at the boundary (the same `as`-free bridge used throughout).
 
 /**
- * Whether IndexedDB is available in this environment.
+ * Checks whether IndexedDB is available in this environment.
  *
  * @remarks
  * Gate IndexedDB code with this and fall back to another storage strategy where
  * it is absent (a non-browser runtime, a privacy mode that disables storage).
  * The entry probe, checked before reaching for the rest of this module.
  *
- * @returns `true` when `globalThis.indexedDB` exists
+ * @returns True if `globalThis.indexedDB` exists; false otherwise
  */
 export function isIndexedDBSupported(): boolean {
 	return typeof globalThis.indexedDB !== 'undefined'
 }
 
 /**
- * Resolve an `IDBRequest` to its result, rejecting with an {@link IndexedDBError}.
+ * Resolves an `IDBRequest` to its result, rejecting with an {@link IndexedDBError}.
  *
  * @remarks
  * The single bridge from IndexedDB's event-based requests to Promises. Issue the
@@ -46,7 +46,7 @@ export function promisifyRequest<T>(request: IDBRequest<T>): Promise<T> {
 }
 
 /**
- * Resolve once an `IDBTransaction` commits, rejecting if it errors or aborts.
+ * Resolves once an `IDBTransaction` commits, rejecting if it errors or aborts.
  *
  * @remarks
  * Await this after issuing the writes of a `readwrite` transaction to guarantee
@@ -67,7 +67,7 @@ export function promisifyTransaction(transaction: IDBTransaction): Promise<void>
 }
 
 /**
- * Run a synchronous native IndexedDB call, wrapping a thrown `DOMException`
+ * Runs a synchronous native IndexedDB call, wrapping a thrown `DOMException`
  * into a typed {@link IndexedDBError}.
  *
  * @remarks
@@ -92,7 +92,7 @@ export function guardSync<T>(action: () => T): T {
 }
 
 /**
- * Read one record by key from a store or index, narrowing it to a {@link Row}.
+ * Reads one record by key from a store or index, narrowing it to a {@link Row}.
  *
  * @remarks
  * The shared point-read of every store-like class (`IndexedDBStore`,
@@ -114,7 +114,7 @@ export async function readRecord(
 }
 
 /**
- * Read many records from a store or index over an optional key range.
+ * Reads many records from a store or index over an optional key range.
  *
  * @remarks
  * The shared bulk read of every store-like class: issue the native `getAll` over
@@ -137,7 +137,7 @@ export async function readRecords(
 }
 
 /**
- * Whether a key is present in a store or index.
+ * Checks whether a key is present in a store or index.
  *
  * @remarks
  * The shared presence test of every store-like class: a native `count` of the
@@ -146,7 +146,7 @@ export async function readRecords(
  *
  * @param source - The object store or index to test
  * @param key - The key to look for
- * @returns `true` when at least one record has the key
+ * @returns True if at least one record has the key; false otherwise
  */
 export async function hasKey(
 	source: IDBObjectStore | IDBIndex,
@@ -156,7 +156,7 @@ export async function hasKey(
 }
 
 /**
- * Create a secondary index on a store from its {@link IndexDefinition}.
+ * Creates a secondary index on a store from its {@link IndexDefinition}.
  *
  * @remarks
  * The shared index-DDL leaf used both by the built-in create-missing-stores pass
@@ -177,7 +177,7 @@ export function createIndex(store: IDBObjectStore, definition: IndexDefinition):
 }
 
 /**
- * Build a key range strictly above one key.
+ * Builds a key range strictly above one key.
  *
  * @param value - The excluded lower boundary
  * @returns A range containing keys greater than `value`
@@ -187,7 +187,7 @@ export function rangeAboveKey(value: IDBValidKey): IDBKeyRange {
 }
 
 /**
- * Build a key range starting at one key.
+ * Builds a key range starting at one key.
  *
  * @param value - The included lower boundary
  * @returns A range containing keys greater than or equal to `value`
@@ -197,7 +197,7 @@ export function rangeFromKey(value: IDBValidKey): IDBKeyRange {
 }
 
 /**
- * Build a key range strictly below one key.
+ * Builds a key range strictly below one key.
  *
  * @param value - The excluded upper boundary
  * @returns A range containing keys less than `value`
@@ -207,7 +207,7 @@ export function rangeBelowKey(value: IDBValidKey): IDBKeyRange {
 }
 
 /**
- * Build a key range ending at one key.
+ * Builds a key range ending at one key.
  *
  * @param value - The included upper boundary
  * @returns A range containing keys less than or equal to `value`
@@ -217,7 +217,7 @@ export function rangeToKey(value: IDBValidKey): IDBKeyRange {
 }
 
 /**
- * Build a key range containing every string with one prefix.
+ * Builds a key range containing every string with one prefix.
  *
  * @param value - The required string prefix
  * @returns A closed range spanning every matching string
@@ -228,7 +228,7 @@ export function rangePrefix(value: string): IDBKeyRange {
 }
 
 /**
- * Map a native IndexedDB `DOMException` to a typed {@link IndexedDBError}.
+ * Maps a native IndexedDB `DOMException` to a typed {@link IndexedDBError}.
  *
  * @remarks
  * The boundary the two Promise bridges ({@link promisifyRequest} /

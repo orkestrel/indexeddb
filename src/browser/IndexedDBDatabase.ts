@@ -16,7 +16,7 @@ import { IndexedDBTransaction } from './IndexedDBTransaction.js'
 import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
 
 /**
- * A browser-native IndexedDB database — a typed, Promise-based handle.
+ * Represents a browser-native IndexedDB database — a typed, Promise-based handle.
  *
  * @remarks
  * Connects lazily on first use (`connect`, also awaited internally by every store

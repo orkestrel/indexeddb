@@ -12,7 +12,7 @@ import { guardSync, hasKey, promisifyRequest, readRecord, readRecords } from './
 import { IndexedDBCursor } from './IndexedDBCursor.js'
 
 /**
- * A secondary index on a store — a read-only view keyed by an indexed path.
+ * Represents a secondary index on a store — a read-only view keyed by an indexed path.
  *
  * @remarks
  * Reached through `store.index(name)`. Each call opens its own `readonly`

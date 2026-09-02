@@ -1,7 +1,7 @@
 import type { IndexedDBErrorCode } from './types.js'
 
 /**
- * Native `DOMException.name` → our {@link IndexedDBErrorCode}.
+ * Maps native `DOMException.name` → our {@link IndexedDBErrorCode}.
  *
  * @remarks
  * The mapping the request boundary's `wrapError` reads to translate a raw

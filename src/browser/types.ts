@@ -13,7 +13,7 @@
 // === Row
 
 /**
- * A record stored in, and read from, an object store.
+ * Represents a record stored in, and read from, an object store.
  *
  * @remarks
  * The value shape every store / index / transaction-store CRUD method reads and
@@ -25,7 +25,7 @@ export type Row = Record<string, unknown>
 // === Errors
 
 /**
- * A machine-readable {@link IndexedDBError} code.
+ * Represents a machine-readable {@link IndexedDBError} code.
  *
  * @remarks
  * Each maps from a native `DOMException.name` or a wrapper-lifecycle fault:
@@ -64,7 +64,7 @@ export type IndexedDBErrorCode =
 // === Schema
 
 /**
- * A key path — one field, or several for a compound key.
+ * Represents a key path — one field, or several for a compound key.
  *
  * @remarks
  * A single string addresses one field; an array addresses a compound key over
@@ -73,7 +73,7 @@ export type IndexedDBErrorCode =
 export type KeyPath = string | readonly string[]
 
 /**
- * A secondary index on a store.
+ * Represents a secondary index on a store.
  *
  * @remarks
  * `name` identifies the index for `store.index(name)`; `path` is the field(s) it
@@ -88,7 +88,7 @@ export interface IndexDefinition {
 }
 
 /**
- * A store's schema.
+ * Represents a store's schema.
  *
  * @remarks
  * `path` is the in-line key path (omit it for an **out-of-line** store, where the
@@ -102,11 +102,11 @@ export interface StoreDefinition {
 	readonly indexes?: readonly IndexDefinition[]
 }
 
-/** A database's stores — a map of store name to its {@link StoreDefinition}. */
+/** Represents a database's stores — a map of store name to its {@link StoreDefinition}. */
 export type StoresShape = Readonly<Record<string, StoreDefinition>>
 
 /**
- * The store manager of a version-change upgrade.
+ * Represents the store manager of a version-change upgrade.
  *
  * @remarks
  * Reached as `context.stores` on {@link IndexedDBUpgradeContext}. `names` lists
@@ -133,7 +133,7 @@ export interface IndexedDBUpgradeStoreManagerInterface {
 }
 
 /**
- * The secondary-index manager of a version-change upgrade.
+ * Represents the secondary-index manager of a version-change upgrade.
  *
  * @remarks
  * Reached as `context.indexes` on {@link IndexedDBUpgradeContext}. `create` adds
@@ -157,7 +157,7 @@ export interface IndexedDBUpgradeIndexManagerInterface {
 }
 
 /**
- * The escape hatch into a version-change upgrade, passed to
+ * Represents the escape hatch into a version-change upgrade, passed to
  * `IndexedDBDatabaseOptions.upgrade`.
  *
  * @remarks
@@ -179,7 +179,7 @@ export interface IndexedDBUpgradeContext {
 }
 
 /**
- * Options for `createIndexedDBDatabase`.
+ * Represents the options for `createIndexedDBDatabase`.
  *
  * @remarks
  * `name` is passed to `indexedDB.open`. `version` is optional: give it to pin an
@@ -214,7 +214,7 @@ export interface IndexedDBDatabaseOptions<Stores extends StoresShape = StoresSha
 }
 
 /**
- * Options for opening a cursor.
+ * Represents the options for opening a cursor.
  *
  * @remarks
  * `query` restricts iteration to a key range (or a single key), and omitting it
@@ -229,7 +229,7 @@ export interface CursorOptions {
 // === Cursor
 
 /**
- * A promisified value cursor for streaming and in-place mutation.
+ * Represents a promisified value cursor for streaming and in-place mutation.
  *
  * @remarks
  * Wraps `IDBCursorWithValue`. `key` / `primary` / `value` snapshot the current
@@ -259,7 +259,7 @@ export interface IndexedDBCursorInterface {
 // === Index
 
 /**
- * A secondary index — read access by an indexed key path.
+ * Represents a secondary index — read access by an indexed key path.
  *
  * @remarks
  * Indexes are read-only views over a store. `get` / `resolve` fetch the first
@@ -290,7 +290,7 @@ export interface IndexedDBIndexInterface {
 // === Record store
 
 /**
- * The keyed record surface of an object store, in or out of an explicit
+ * Represents the keyed record surface of an object store, in or out of an explicit
  * transaction.
  *
  * @remarks
@@ -328,8 +328,8 @@ export interface IndexedDBRecordStoreInterface {
 // === Store
 
 /**
- * An object store — the keyed record surface plus the store's own schema metadata and
- * `index` accessor.
+ * Represents an object store — the keyed record surface plus the store's own schema
+ * metadata and `index` accessor.
  *
  * @remarks
  * {@link IndexedDBRecordStoreInterface} plus the store's own schema metadata and
@@ -349,7 +349,7 @@ export interface IndexedDBStoreInterface extends IndexedDBRecordStoreInterface {
 // === Transaction store
 
 /**
- * An object store bound to an explicit transaction.
+ * Represents an object store bound to an explicit transaction.
  *
  * @remarks
  * The same {@link IndexedDBRecordStoreInterface} surface as
@@ -365,7 +365,7 @@ export interface IndexedDBTransactionStoreInterface extends IndexedDBRecordStore
 // === Transaction
 
 /**
- * An explicit transaction over one or more stores.
+ * Represents an explicit transaction over one or more stores.
  *
  * @remarks
  * Obtained through the `scope` callback of the database's `read` / `write`. `store`
@@ -390,7 +390,7 @@ export interface IndexedDBTransactionInterface<Stores extends StoresShape = Stor
 // === Database
 
 /**
- * A browser-native IndexedDB database.
+ * Represents a browser-native IndexedDB database.
  *
  * @remarks
  * A typed, Promise-based handle over `IDBDatabase`. It connects lazily on first

@@ -2,7 +2,7 @@ import type { IndexedDBDatabaseInterface, IndexedDBDatabaseOptions, StoresShape 
 import { IndexedDBDatabase } from './IndexedDBDatabase.js'
 
 /**
- * Create a browser-native IndexedDB database over a store schema.
+ * Creates a browser-native IndexedDB database over a store schema.
  *
  * @remarks
  * The `const` type parameter captures the literal store names, so `db.store(name)`
