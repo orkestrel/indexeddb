@@ -1,4 +1,4 @@
-import { IndexedDBError, rangeAboveKey, rangeBetweenKeys, rangeFromKey } from '@src/browser'
+import { IndexedDBError, rangeAboveKey, rangeFromKey } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createTeardown } from '@orkestrel/test'
 import { createTestDatabase, drainCursor, errorCode, seedUsers } from '../../setupBrowser.js'
@@ -82,7 +82,10 @@ describe('IndexedDBIndex — key ranges', () => {
 		const db = await seed()
 		const byAge = db.store('users').index('byAge')
 		expect((await byAge.records(rangeFromKey(30))).map((row) => row.id)).toEqual(['b', 'c'])
-		expect((await byAge.records(rangeBetweenKeys(25, 45))).map((row) => row.id)).toEqual(['b', 'c'])
+		expect((await byAge.records(IDBKeyRange.bound(25, 45))).map((row) => row.id)).toEqual([
+			'b',
+			'c',
+		])
 		expect(await byAge.count(rangeAboveKey(20))).toBe(2)
 		expect(await byAge.count()).toBe(3)
 	})
@@ -146,7 +149,7 @@ describe('IndexedDBIndex — cursor', () => {
 		const seen = await drainCursor(await byAge.cursor())
 		// Cursor walks in index (age) order — here it matches id order, but the
 		// `key` is the index value and `primary` the primary key.
-		expect(seen.map((cursor) => cursor.value.id)).toEqual(['a', 'b', 'c'])
+		expect(seen.map((cursor) => cursor.value?.id)).toEqual(['a', 'b', 'c'])
 		expect(seen.map((cursor) => cursor.key)).toEqual([20, 30, 40])
 		expect(seen.map((cursor) => cursor.primary)).toEqual(['a', 'b', 'c'])
 

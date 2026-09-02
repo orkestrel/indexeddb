@@ -8,8 +8,8 @@ import { IndexedDBError } from './errors.js'
 // to fall back to another storage strategy where storage is absent), and the
 // wrapper's foundation — the two Promise bridges every class builds on
 // (`IDBRequest` → value, `IDBTransaction` → completion), the key-range builders
-// that stand in for a query DSL, and the small read primitives the store /
-// index / transaction-store classes share over a native
+// that name a boundary the native call states as a bare boolean, and the small
+// read primitives the store / index / transaction-store classes share over a native
 // `IDBObjectStore | IDBIndex`, each narrowing the structured clone to a `Row`
 // with `isRecord` at the boundary (the same `as`-free bridge used throughout).
 
@@ -123,18 +123,16 @@ export async function readRecord(
  * {@link readRecord}, applied across the batch.
  *
  * @param source - The object store or index to read from
- * @param query - A key range or single key to restrict the read, or `null` for all
+ * @param query - A key range or single key to restrict the read; omit it to read every record
  * @param count - The maximum number of records to read
  * @returns The matching records
  */
 export async function readRecords(
 	source: IDBObjectStore | IDBIndex,
-	query?: IDBKeyRange | IDBValidKey | null,
+	query?: IDBKeyRange | IDBValidKey,
 	count?: number,
 ): Promise<readonly Row[]> {
-	const all = await promisifyRequest<unknown[]>(
-		guardSync(() => source.getAll(query ?? undefined, count)),
-	)
+	const all = await promisifyRequest<unknown[]>(guardSync(() => source.getAll(query, count)))
 	return all.filter(isRecord)
 }
 
@@ -163,8 +161,8 @@ export async function hasKey(
  * @remarks
  * The shared index-DDL leaf used both by the built-in create-missing-stores pass
  * (`IndexedDBDatabase`'s internal store creation) and by an upgrade's
- * `context.index`: translate the definition's `path` to a native key path and
- * `unique` / `multiple` to `unique` / `multiEntry`, then issue `createIndex`.
+ * `context.indexes.create`: translate the definition's `path` to a native key path
+ * and `unique` / `multiple` to `unique` / `multiEntry`, then issue `createIndex`.
  * Versionchange-only — `store` must be inside an active upgrade transaction.
  *
  * @param store - The object store to add the index to
@@ -176,16 +174,6 @@ export function createIndex(store: IDBObjectStore, definition: IndexDefinition):
 		unique: definition.unique ?? false,
 		multiEntry: definition.multiple ?? false,
 	})
-}
-
-/**
- * Build a key range matching exactly one key.
- *
- * @param value - The sole key in the range
- * @returns A closed range containing only `value`
- */
-export function rangeExactKey(value: IDBValidKey): IDBKeyRange {
-	return IDBKeyRange.only(value)
 }
 
 /**
@@ -226,24 +214,6 @@ export function rangeBelowKey(value: IDBValidKey): IDBKeyRange {
  */
 export function rangeToKey(value: IDBValidKey): IDBKeyRange {
 	return IDBKeyRange.upperBound(value, false)
-}
-
-/**
- * Build a key range between two boundaries.
- *
- * @param lower - The lower boundary
- * @param upper - The upper boundary
- * @param lowerOpen - Whether to exclude the lower boundary
- * @param upperOpen - Whether to exclude the upper boundary
- * @returns The bounded key range
- */
-export function rangeBetweenKeys(
-	lower: IDBValidKey,
-	upper: IDBValidKey,
-	lowerOpen = false,
-	upperOpen = false,
-): IDBKeyRange {
-	return IDBKeyRange.bound(lower, upper, lowerOpen, upperOpen)
 }
 
 /**

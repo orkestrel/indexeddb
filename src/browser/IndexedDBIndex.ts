@@ -78,17 +78,14 @@ export class IndexedDBIndex implements IndexedDBIndexInterface {
 		return this.#resolve(index, keyOrKeys)
 	}
 
-	async records(query?: IDBKeyRange | IDBValidKey | null, count?: number): Promise<readonly Row[]> {
+	async records(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly Row[]> {
 		const index = await this.#index()
 		return readRecords(index, query, count)
 	}
 
-	async keys(
-		query?: IDBKeyRange | IDBValidKey | null,
-		count?: number,
-	): Promise<readonly IDBValidKey[]> {
+	async keys(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly IDBValidKey[]> {
 		const index = await this.#index()
-		return promisifyRequest(guardSync(() => index.getAllKeys(query ?? undefined, count)))
+		return promisifyRequest(guardSync(() => index.getAllKeys(query, count)))
 	}
 
 	async primary(key: IDBValidKey): Promise<IDBValidKey | undefined> {
@@ -108,16 +105,14 @@ export class IndexedDBIndex implements IndexedDBIndexInterface {
 		return hasKey(index, keyOrKeys)
 	}
 
-	async count(query?: IDBKeyRange | IDBValidKey | null): Promise<number> {
+	async count(query?: IDBKeyRange | IDBValidKey): Promise<number> {
 		const index = await this.#index()
-		return promisifyRequest(guardSync(() => index.count(query ?? undefined)))
+		return promisifyRequest(guardSync(() => index.count(query)))
 	}
 
 	async cursor(options?: CursorOptions): Promise<IndexedDBCursorInterface | null> {
 		const index = await this.#index()
-		const request = guardSync(() =>
-			index.openCursor(options?.query ?? null, options?.direction ?? 'next'),
-		)
+		const request = guardSync(() => index.openCursor(options?.query, options?.direction ?? 'next'))
 		const cursor = await promisifyRequest(request)
 		return cursor ? new IndexedDBCursor(cursor, request) : null
 	}

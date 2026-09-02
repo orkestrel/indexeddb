@@ -53,15 +53,12 @@ export class IndexedDBTransactionStore implements IndexedDBTransactionStoreInter
 		return this.#resolve(keyOrKeys)
 	}
 
-	async records(query?: IDBKeyRange | IDBValidKey | null, count?: number): Promise<readonly Row[]> {
+	async records(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly Row[]> {
 		return readRecords(this.#store, query, count)
 	}
 
-	async keys(
-		query?: IDBKeyRange | IDBValidKey | null,
-		count?: number,
-	): Promise<readonly IDBValidKey[]> {
-		return promisifyRequest(guardSync(() => this.#store.getAllKeys(query ?? undefined, count)))
+	async keys(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly IDBValidKey[]> {
+		return promisifyRequest(guardSync(() => this.#store.getAllKeys(query, count)))
 	}
 
 	has(keys: readonly IDBValidKey[]): Promise<readonly boolean[]>
@@ -75,8 +72,8 @@ export class IndexedDBTransactionStore implements IndexedDBTransactionStoreInter
 		return hasKey(this.#store, keyOrKeys)
 	}
 
-	async count(query?: IDBKeyRange | IDBValidKey | null): Promise<number> {
-		return promisifyRequest(guardSync(() => this.#store.count(query ?? undefined)))
+	async count(query?: IDBKeyRange | IDBValidKey): Promise<number> {
+		return promisifyRequest(guardSync(() => this.#store.count(query)))
 	}
 
 	set(values: readonly Row[]): Promise<readonly IDBValidKey[]>
@@ -133,7 +130,7 @@ export class IndexedDBTransactionStore implements IndexedDBTransactionStoreInter
 
 	async cursor(options?: CursorOptions): Promise<IndexedDBCursorInterface | null> {
 		const request = guardSync(() =>
-			this.#store.openCursor(options?.query ?? null, options?.direction ?? 'next'),
+			this.#store.openCursor(options?.query, options?.direction ?? 'next'),
 		)
 		const cursor = await promisifyRequest(request)
 		return cursor ? new IndexedDBCursor(cursor, request) : null

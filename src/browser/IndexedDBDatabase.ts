@@ -308,7 +308,7 @@ export class IndexedDBDatabase<
 	}
 
 	// Build the upgrade context passed to `options.upgrade`, after the built-in
-	// create-missing-stores pass so `stores` reflects any store just created.
+	// create-missing-stores pass so `stores.names` reflects any store just created.
 	#context(
 		database: IDBDatabase,
 		transaction: IDBTransaction,
@@ -318,12 +318,16 @@ export class IndexedDBDatabase<
 			transaction,
 			old: event.oldVersion,
 			version: event.newVersion ?? database.version,
-			stores: Array.from(database.objectStoreNames),
-			create: this.#createUpgradeStore.bind(this, database),
-			drop: this.#dropUpgradeStore.bind(this, database),
-			store: this.#reachUpgradeStore.bind(this, transaction),
-			index: this.#createUpgradeIndex.bind(this, transaction),
-			deindex: this.#dropUpgradeIndex.bind(this, transaction),
+			stores: {
+				names: Array.from(database.objectStoreNames),
+				create: this.#createUpgradeStore.bind(this, database),
+				drop: this.#dropUpgradeStore.bind(this, database),
+				open: this.#openUpgradeStore.bind(this, transaction),
+			},
+			indexes: {
+				create: this.#createUpgradeIndex.bind(this, transaction),
+				drop: this.#dropUpgradeIndex.bind(this, transaction),
+			},
 		}
 	}
 
@@ -346,7 +350,7 @@ export class IndexedDBDatabase<
 		guardSync(() => database.deleteObjectStore(name))
 	}
 
-	#reachUpgradeStore(transaction: IDBTransaction, name: string): IndexedDBTransactionStore {
+	#openUpgradeStore(transaction: IDBTransaction, name: string): IndexedDBTransactionStore {
 		return new IndexedDBTransactionStore(guardSync(() => transaction.objectStore(name)))
 	}
 

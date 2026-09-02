@@ -568,7 +568,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			version: 2,
 			stores: { users: { path: 'id' }, posts: { path: 'id' } },
 			upgrade: (context) => {
-				context.drop('posts')
+				context.stores.drop('posts')
 			},
 		})
 		teardown.add(async () => {
@@ -580,7 +580,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		expect(await v2.store('users').get('u1')).toEqual({ id: 'u1', name: 'Ada' })
 	})
 
-	it('adds an index to an existing store via context.index', async () => {
+	it('adds an index to an existing store through context.indexes.create', async () => {
 		const name = uniqueName()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
@@ -596,7 +596,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			version: 2,
 			stores: { users: { path: 'id', indexes: [{ name: 'byName', path: 'name' }] } },
 			upgrade: (context) => {
-				context.index('users', { name: 'byName', path: 'name' })
+				context.indexes.create('users', { name: 'byName', path: 'name' })
 			},
 		})
 		teardown.add(async () => {
@@ -607,7 +607,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		expect(await v2.store('users').index('byName').get('Bea')).toEqual({ id: 'u2', name: 'Bea' })
 	})
 
-	it('adds a unique index to a store created in the same upgrade via context.create', async () => {
+	it('adds a unique index to a store created in the same upgrade through context.stores.create', async () => {
 		const name = uniqueName()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
@@ -619,8 +619,8 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			version: 2,
 			stores: { users: { path: 'id' } },
 			upgrade: (context) => {
-				context.create('logs', { path: 'id' })
-				context.index('logs', { name: 'byMessage', path: 'message', unique: true })
+				context.stores.create('logs', { path: 'id' })
+				context.indexes.create('logs', { name: 'byMessage', path: 'message', unique: true })
 			},
 		})
 		teardown.add(async () => {
@@ -647,7 +647,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		expect(errorCode(caught)).toBe('CONSTRAINT')
 	})
 
-	it('removes an index via context.deindex', async () => {
+	it('removes an index through context.indexes.drop', async () => {
 		const name = uniqueName()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({
@@ -664,7 +664,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			version: 2,
 			stores: { users: { path: 'id' } },
 			upgrade: (context) => {
-				context.deindex('users', 'byName')
+				context.indexes.drop('users', 'byName')
 			},
 		})
 		teardown.add(async () => {
@@ -677,7 +677,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		await promisifyTransaction(read)
 	})
 
-	it('migrates data within the upgrade transaction via context.store', async () => {
+	it('migrates data within the upgrade transaction through context.stores.open', async () => {
 		const name = uniqueName()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
@@ -693,7 +693,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			version: 2,
 			stores: { users: { path: 'id' } },
 			upgrade: async (context) => {
-				const store = context.store('users')
+				const store = context.stores.open('users')
 				const rows = await store.records()
 				for (const row of rows) {
 					const nameValue = typeof row.name === 'string' ? row.name.toUpperCase() : row.name
@@ -724,7 +724,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			version: 2,
 			stores: { users: { path: 'id' } },
 			upgrade: async (context) => {
-				const store = context.store('users')
+				const store = context.stores.open('users')
 				// Await a real IDB request first, so the versionchange transaction is
 				// still alive when the throw below happens.
 				await store.records()
@@ -815,7 +815,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		expect(v2.open).toBe(false)
 	})
 
-	it('creates a store via context.create, honouring its definition', async () => {
+	it('creates a store through context.stores.create, honouring its definition', async () => {
 		const name = uniqueName()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
@@ -827,7 +827,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			version: 2,
 			stores: { users: { path: 'id' } },
 			upgrade: (context) => {
-				context.create('logs', { path: 'id', increment: false })
+				context.stores.create('logs', { path: 'id', increment: false })
 			},
 		})
 		teardown.add(async () => {
@@ -844,7 +844,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		expect(record).toEqual({ id: 'l1', message: 'hi' })
 	})
 
-	it('surfaces a typed IndexedDBError when context.drop targets a missing store', async () => {
+	it('surfaces a typed IndexedDBError when context.stores.drop targets a missing store', async () => {
 		const name = uniqueName()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
@@ -856,7 +856,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			version: 2,
 			stores: { users: { path: 'id' } },
 			upgrade: (context) => {
-				context.drop('missing')
+				context.stores.drop('missing')
 			},
 		})
 		teardown.add(async () => {
@@ -869,7 +869,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		expect(v2.open).toBe(false)
 	})
 
-	it('surfaces a typed IndexedDBError when context.deindex targets a missing index', async () => {
+	it('surfaces a typed IndexedDBError when context.indexes.drop targets a missing index', async () => {
 		const name = uniqueName()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
@@ -881,7 +881,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			version: 2,
 			stores: { users: { path: 'id' } },
 			upgrade: (context) => {
-				context.deindex('users', 'missing')
+				context.indexes.drop('users', 'missing')
 			},
 		})
 		teardown.add(async () => {
@@ -894,7 +894,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		expect(v2.open).toBe(false)
 	})
 
-	it('exposes old / version / stores correctly on the context', async () => {
+	it('exposes old / version / stores.names correctly on the context', async () => {
 		const name = uniqueName()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
@@ -911,7 +911,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			upgrade: (context) => {
 				seenOld = context.old
 				seenVersion = context.version
-				seenStores = context.stores
+				seenStores = context.stores.names
 			},
 		})
 		teardown.add(async () => {

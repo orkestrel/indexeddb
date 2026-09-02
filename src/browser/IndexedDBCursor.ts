@@ -8,7 +8,9 @@ import { guardSync, promisifyRequest } from './helpers.js'
  * @remarks
  * Wraps `IDBCursorWithValue` and the request that drives it. The position
  * (`key` / `primary` / `value`) is snapshot at construction because IndexedDB
- * mutates the live cursor object in place on each advance. `continue` / `seek` /
+ * mutates the live cursor object in place on each advance. `value` narrows the
+ * stored value with `isRecord` and is `undefined` when that value is not a
+ * record, the same absence `readRecord` reports. `continue` / `seek` /
  * `advance` re-arm the shared request and resolve to the next position (a fresh
  * `IndexedDBCursor`) or `null` at the end. `update` / `delete` act on the current
  * record — they require the cursor's transaction to be `readwrite` (a `store`
@@ -19,7 +21,7 @@ export class IndexedDBCursor implements IndexedDBCursorInterface {
 	readonly #request: IDBRequest<IDBCursorWithValue | null>
 	readonly #key: IDBValidKey
 	readonly #primary: IDBValidKey
-	#value: Row
+	#value: Row | undefined
 	readonly #direction: IDBCursorDirection
 
 	constructor(cursor: IDBCursorWithValue, request: IDBRequest<IDBCursorWithValue | null>) {
@@ -27,7 +29,7 @@ export class IndexedDBCursor implements IndexedDBCursorInterface {
 		this.#request = request
 		this.#key = cursor.key
 		this.#primary = cursor.primaryKey
-		this.#value = isRecord(cursor.value) ? cursor.value : {}
+		this.#value = isRecord(cursor.value) ? cursor.value : undefined
 		this.#direction = cursor.direction
 	}
 
@@ -47,7 +49,7 @@ export class IndexedDBCursor implements IndexedDBCursorInterface {
 		return this.#primary
 	}
 
-	get value(): Row {
+	get value(): Row | undefined {
 		return this.#value
 	}
 

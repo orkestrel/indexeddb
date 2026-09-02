@@ -1,4 +1,4 @@
-import { IndexedDBError, rangeExactKey, rangeFromKey, rangePrefix } from '@src/browser'
+import { IndexedDBError, rangeFromKey, rangePrefix } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import { captureError, createTeardown } from '@orkestrel/test'
 import { createTestDatabase, drainCursor, errorCode } from '../../setupBrowser.js'
@@ -35,7 +35,7 @@ describe('IndexedDBStore — metadata', () => {
 		expect(users.increment).toBe(false)
 
 		const events = db.store('events')
-		expect(events.path).toBeNull()
+		expect(events.path).toBeUndefined()
 		expect(events.indexes).toEqual([])
 		expect(events.increment).toBe(true)
 	})
@@ -151,7 +151,7 @@ describe('IndexedDBStore — key strategies', () => {
 		const { db, cleanup } = await createTestDatabase({ events: {} })
 		teardown.add(cleanup)
 		const events = db.store('events')
-		expect(events.path).toBeNull()
+		expect(events.path).toBeUndefined()
 		await events.set({ type: 'click' }, 'e1')
 		expect(await events.get('e1')).toEqual({ type: 'click' })
 	})
@@ -168,7 +168,7 @@ describe('IndexedDBStore — key strategies', () => {
 		expect(await log.keys()).toEqual([1, 2])
 	})
 
-	it('reads a single compound key via rangeExactKey', async () => {
+	it('reads a single compound key through a native only range', async () => {
 		const { db, cleanup } = await createTestDatabase({ parts: { path: ['make', 'model'] } })
 		teardown.add(cleanup)
 		const parts = db.store('parts')
@@ -176,10 +176,10 @@ describe('IndexedDBStore — key strategies', () => {
 			{ make: 'acme', model: 'a', stock: 1 },
 			{ make: 'acme', model: 'b', stock: 2 },
 		])
-		expect(await parts.records(rangeExactKey(['acme', 'b']))).toEqual([
+		expect(await parts.records(IDBKeyRange.only(['acme', 'b']))).toEqual([
 			{ make: 'acme', model: 'b', stock: 2 },
 		])
-		expect(await parts.count(rangeExactKey(['acme', 'b']))).toBe(1)
+		expect(await parts.count(IDBKeyRange.only(['acme', 'b']))).toBe(1)
 	})
 })
 
@@ -220,6 +220,6 @@ describe('IndexedDBStore — index and cursor access', () => {
 		expect(await users.cursor()).toBeNull()
 		await users.set([{ id: 'a' }, { id: 'b' }])
 		const seen = await drainCursor(await users.cursor())
-		expect(seen.map((cursor) => cursor.value.id)).toEqual(['a', 'b'])
+		expect(seen.map((cursor) => cursor.value?.id)).toEqual(['a', 'b'])
 	})
 })

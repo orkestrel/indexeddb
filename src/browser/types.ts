@@ -106,63 +106,76 @@ export interface StoreDefinition {
 export type StoresShape = Readonly<Record<string, StoreDefinition>>
 
 /**
+ * Manages the object stores of a version-change upgrade.
+ *
+ * @remarks
+ * Reached as `context.stores` on {@link IndexedDBUpgradeContext}. `names` lists
+ * the stores the database holds at that moment, so it already reflects any store
+ * the built-in create-missing pass just created. `create` / `drop` add or remove
+ * a whole store; `open` reaches a transaction-bound store for data migration.
+ * Versionchange-only: every call must stay within the upgrade transaction — no
+ * non-IDB `await`, or it auto-commits and the upgrade fails.
+ *
+ * @example
+ * ```ts
+ * upgrade: async (context) => {
+ * 	context.stores.create('meta', { path: 'key' })
+ * 	context.stores.drop('legacy')
+ * 	await context.stores.open('users').set({ id: 'u1', migrated: true })
+ * }
+ * ```
+ */
+export interface IndexedDBUpgradeStoreManagerInterface {
+	readonly names: readonly string[]
+	create(name: string, definition: StoreDefinition): void
+	drop(name: string): void
+	open(name: string): IndexedDBTransactionStoreInterface
+}
+
+/**
+ * Manages the secondary indexes of a version-change upgrade.
+ *
+ * @remarks
+ * Reached as `context.indexes` on {@link IndexedDBUpgradeContext}. `create` adds
+ * a secondary index to a store — mirroring the index translation the built-in
+ * schema pass applies to a store's declared `indexes` — and `drop` removes one
+ * by name. Versionchange-only, and the named store must already exist within the
+ * current upgrade transaction: declared in the schema, created earlier in the
+ * same upgrade, or already present from a prior version.
+ *
+ * @example
+ * ```ts
+ * upgrade(context) {
+ * 	context.indexes.create('books', { name: 'byAuthor', path: 'author' })
+ * 	context.indexes.drop('books', 'byTitle')
+ * }
+ * ```
+ */
+export interface IndexedDBUpgradeIndexManagerInterface {
+	create(store: string, definition: IndexDefinition): void
+	drop(store: string, name: string): void
+}
+
+/**
  * The escape hatch into a version-change upgrade, passed to
  * `IndexedDBDatabaseOptions.upgrade`.
  *
  * @remarks
  * Runs INSIDE `onupgradeneeded`, after the built-in create-missing-stores pass —
- * so `stores` already reflects any store just created from the declared schema.
- * `transaction` is the raw versionchange `IDBTransaction`, the escape hatch for
- * anything the raw API offers that this wrapper does not model directly; `old` /
+ * so `stores.names` already reflects any store just created from the declared
+ * schema. `transaction` is the raw versionchange `IDBTransaction`, the escape hatch
+ * for anything the raw API offers that this wrapper does not model directly; `old` /
  * `version` are the prior and target database versions (`old` is `0` on first
- * create); `create` / `drop` add or remove a whole store; `index` / `deindex` add
- * or remove a secondary index on a store; `store` reaches a transaction-bound
- * store for data migration. Everything invoked here must stay within the
- * versionchange transaction — no non-IDB `await`, or it auto-commits and the
- * upgrade fails.
+ * create); `stores` manages whole stores and `indexes` manages secondary indexes.
+ * Everything invoked here must stay within the versionchange transaction — no
+ * non-IDB `await`, or it auto-commits and the upgrade fails.
  */
 export interface IndexedDBUpgradeContext {
 	readonly transaction: IDBTransaction
 	readonly old: number
 	readonly version: number
-	readonly stores: readonly string[]
-	create(name: string, definition: StoreDefinition): void
-	drop(name: string): void
-	store(name: string): IndexedDBTransactionStoreInterface
-	/**
-	 * Create a secondary index on `store`.
-	 *
-	 * @param store - Name of an existing store, or one just created in this same upgrade via `create`.
-	 * @param definition - The index to add — {@link IndexDefinition}.
-	 * @remarks
-	 * Versionchange-only: `store` must already exist within the current upgrade
-	 * transaction (either declared in the schema, created earlier in the same
-	 * upgrade, or already present from a prior version). Mirrors the index
-	 * translation the built-in schema pass applies to a store's declared
-	 * `indexes`.
-	 * @example
-	 * ```ts
-	 * upgrade(context) {
-	 *   context.index('books', { name: 'byAuthor', path: 'author' })
-	 * }
-	 * ```
-	 */
-	index(store: string, definition: IndexDefinition): void
-	/**
-	 * Remove a named index from `store`.
-	 *
-	 * @param store - Name of an existing store within the current upgrade transaction.
-	 * @param name - The index name to remove.
-	 * @remarks
-	 * Versionchange-only, same constraint as `index`.
-	 * @example
-	 * ```ts
-	 * upgrade(context) {
-	 *   context.deindex('books', 'byAuthor')
-	 * }
-	 * ```
-	 */
-	deindex(store: string, name: string): void
+	readonly stores: IndexedDBUpgradeStoreManagerInterface
+	readonly indexes: IndexedDBUpgradeIndexManagerInterface
 }
 
 /**
@@ -175,10 +188,11 @@ export interface IndexedDBUpgradeContext {
  * database opens at its current version and bumps once to create any declared store
  * the stored schema is missing — so adding a store never needs a manual version
  * bump. `upgrade` runs after the built-in create-missing-stores pass, inside the
- * same versionchange transaction — use it to drop a store, add or remove an index
- * on any store with `context.index` / `context.deindex`, or migrate data with
- * `context.store(name)`. It may return `void` or a `Promise<void>` — an async
- * `upgrade` may `await` the IDB requests it issues through `context.store(...)`
+ * same versionchange transaction — use it to drop a store with
+ * `context.stores.drop`, add or remove an index on any store with
+ * `context.indexes.create` / `context.indexes.drop`, or migrate data with
+ * `context.stores.open(name)`. It may return `void` or a `Promise<void>` — an async
+ * `upgrade` may `await` the IDB requests it issues through `context.stores.open(...)`
  * (see the auto-commit rule on {@link IndexedDBUpgradeContext}). The built-in
  * pass and custom callback share one failure boundary: a synchronous failure in
  * either phase, or a custom rejection captured while the versionchange
@@ -203,11 +217,12 @@ export interface IndexedDBDatabaseOptions<Stores extends StoresShape = StoresSha
  * Options for opening a cursor.
  *
  * @remarks
- * `query` restricts iteration to a key range (or a single key); `direction` sets
- * the traversal order (`next` / `prev` / their `unique` variants).
+ * `query` restricts iteration to a key range (or a single key), and omitting it
+ * iterates every record; `direction` sets the traversal order (`next` / `prev` /
+ * their `unique` variants).
  */
 export interface CursorOptions {
-	readonly query?: IDBKeyRange | IDBValidKey | null
+	readonly query?: IDBKeyRange | IDBValidKey
 	readonly direction?: IDBCursorDirection
 }
 
@@ -219,17 +234,20 @@ export interface CursorOptions {
  * @remarks
  * Wraps `IDBCursorWithValue`. `key` / `primary` / `value` snapshot the current
  * position (IndexedDB reuses the live cursor object on advance, so they are read
- * eagerly). `continue` / `seek` / `advance` resolve to the next cursor or `null`
- * at the end; `update` / `delete` mutate the record at the current position. The
- * owning transaction stays alive only while you drive the cursor promptly — do no
- * unrelated `await` between steps, or it auto-commits.
+ * eagerly). `value` is the record at that position narrowed with `isRecord`, and
+ * `undefined` when the stored value is not a record — the same absence
+ * `readRecord` reports for that boundary. `continue` / `seek` / `advance` resolve
+ * to the next cursor or `null` at the end; `update` / `delete` mutate the record
+ * at the current position. The owning transaction stays alive only while you
+ * drive the cursor promptly — do no unrelated `await` between steps, or it
+ * auto-commits.
  */
 export interface IndexedDBCursorInterface {
 	readonly cursor: IDBCursorWithValue
 	readonly source: IDBObjectStore | IDBIndex
 	readonly key: IDBValidKey
 	readonly primary: IDBValidKey
-	readonly value: Row
+	readonly value: Row | undefined
 	readonly direction: IDBCursorDirection
 	continue(key?: IDBValidKey): Promise<IndexedDBCursorInterface | null>
 	seek(key: IDBValidKey, primary: IDBValidKey): Promise<IndexedDBCursorInterface | null>
@@ -260,12 +278,50 @@ export interface IndexedDBIndexInterface {
 	get(key: IDBValidKey): Promise<Row | undefined>
 	resolve(keys: readonly IDBValidKey[]): Promise<readonly Row[]>
 	resolve(key: IDBValidKey): Promise<Row>
-	records(query?: IDBKeyRange | IDBValidKey | null, count?: number): Promise<readonly Row[]>
-	keys(query?: IDBKeyRange | IDBValidKey | null, count?: number): Promise<readonly IDBValidKey[]>
+	records(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly Row[]>
+	keys(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly IDBValidKey[]>
 	primary(key: IDBValidKey): Promise<IDBValidKey | undefined>
 	has(keys: readonly IDBValidKey[]): Promise<readonly boolean[]>
 	has(key: IDBValidKey): Promise<boolean>
-	count(query?: IDBKeyRange | IDBValidKey | null): Promise<number>
+	count(query?: IDBKeyRange | IDBValidKey): Promise<number>
+	cursor(options?: CursorOptions): Promise<IndexedDBCursorInterface | null>
+}
+
+// === Record store
+
+/**
+ * The keyed record surface of an object store, in or out of an explicit
+ * transaction.
+ *
+ * @remarks
+ * The member set {@link IndexedDBStoreInterface} and
+ * {@link IndexedDBTransactionStoreInterface} share, declared once so neither can
+ * drift from the other. `get` / `resolve` read by key (`resolve` throws
+ * `NOT_FOUND`); `records` / `keys` read many over an optional key range; `has` /
+ * `count` test presence; `set` upserts and `add` inserts (throwing `CONSTRAINT`
+ * on a duplicate); `remove` deletes; `clear` empties the store; `cursor` streams.
+ * The keyed verbs batch by their array overload — listed first, because an array is
+ * itself a valid record and a compound `IDBValidKey`, so the array signature must
+ * win (AGENTS §9.2). To act on a single **compound** key, pass
+ * `IDBKeyRange.only([…])` to `records` / `count`.
+ */
+export interface IndexedDBRecordStoreInterface {
+	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<Row | undefined>>
+	get(key: IDBValidKey): Promise<Row | undefined>
+	resolve(keys: readonly IDBValidKey[]): Promise<readonly Row[]>
+	resolve(key: IDBValidKey): Promise<Row>
+	records(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly Row[]>
+	keys(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly IDBValidKey[]>
+	has(keys: readonly IDBValidKey[]): Promise<readonly boolean[]>
+	has(key: IDBValidKey): Promise<boolean>
+	count(query?: IDBKeyRange | IDBValidKey): Promise<number>
+	set(values: readonly Row[]): Promise<readonly IDBValidKey[]>
+	set(value: Row, key?: IDBValidKey): Promise<IDBValidKey>
+	add(values: readonly Row[]): Promise<readonly IDBValidKey[]>
+	add(value: Row, key?: IDBValidKey): Promise<IDBValidKey>
+	remove(keys: readonly IDBValidKey[]): Promise<void>
+	remove(key: IDBValidKey): Promise<void>
+	clear(): Promise<void>
 	cursor(options?: CursorOptions): Promise<IndexedDBCursorInterface | null>
 }
 
@@ -276,38 +332,18 @@ export interface IndexedDBIndexInterface {
  * access.
  *
  * @remarks
- * Each call runs in its own implicit transaction; for atomic multi-operation work
- * use the database's `read` / `write`. `get` / `resolve` read by key (`resolve`
- * throws `NOT_FOUND`); `records` / `keys` read many over an optional key range;
- * `set` upserts and `add` inserts (throwing `CONSTRAINT` on a duplicate);
- * `remove` deletes; `clear` empties the store. The keyed verbs batch by their
- * array overload — listed first, since an array is itself a valid record and a
- * compound `IDBValidKey`, so the array signature must win (AGENTS §9.2). To act on
- * a single **compound** key, pass `rangeExactKey([…])` to `records` / `count`.
+ * {@link IndexedDBRecordStoreInterface} plus the store's own schema metadata and
+ * `index` accessor. Each call runs in its own implicit transaction; for atomic
+ * multi-operation work use the database's `read` / `write`. `path` is the in-line
+ * key path, and `undefined` for an out-of-line store, exactly as
+ * {@link StoreDefinition} declares it.
  */
-export interface IndexedDBStoreInterface {
+export interface IndexedDBStoreInterface extends IndexedDBRecordStoreInterface {
 	readonly name: string
-	readonly path: KeyPath | null
+	readonly path: KeyPath | undefined
 	readonly indexes: readonly string[]
 	readonly increment: boolean
-	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<Row | undefined>>
-	get(key: IDBValidKey): Promise<Row | undefined>
-	resolve(keys: readonly IDBValidKey[]): Promise<readonly Row[]>
-	resolve(key: IDBValidKey): Promise<Row>
-	records(query?: IDBKeyRange | IDBValidKey | null, count?: number): Promise<readonly Row[]>
-	keys(query?: IDBKeyRange | IDBValidKey | null, count?: number): Promise<readonly IDBValidKey[]>
-	has(keys: readonly IDBValidKey[]): Promise<readonly boolean[]>
-	has(key: IDBValidKey): Promise<boolean>
-	count(query?: IDBKeyRange | IDBValidKey | null): Promise<number>
-	set(values: readonly Row[]): Promise<readonly IDBValidKey[]>
-	set(value: Row, key?: IDBValidKey): Promise<IDBValidKey>
-	add(values: readonly Row[]): Promise<readonly IDBValidKey[]>
-	add(value: Row, key?: IDBValidKey): Promise<IDBValidKey>
-	remove(keys: readonly IDBValidKey[]): Promise<void>
-	remove(key: IDBValidKey): Promise<void>
-	clear(): Promise<void>
 	index(name: string): IndexedDBIndexInterface
-	cursor(options?: CursorOptions): Promise<IndexedDBCursorInterface | null>
 }
 
 // === Transaction store
@@ -316,30 +352,14 @@ export interface IndexedDBStoreInterface {
  * An object store bound to an explicit transaction.
  *
  * @remarks
- * The same CRUD surface as {@link IndexedDBStoreInterface}, but every call runs in
- * the owning transaction (opened by the database's `read` / `write`) rather than
- * its own — so a sequence of reads and writes is atomic. It drops `index` and the
- * standalone implicit-transaction conveniences; reach the live `store` for those.
+ * The same {@link IndexedDBRecordStoreInterface} surface as
+ * {@link IndexedDBStoreInterface}, but every call runs in the owning transaction
+ * (opened by the database's `read` / `write`) rather than its own — so a sequence
+ * of reads and writes is atomic. It drops `index` and the standalone
+ * implicit-transaction conveniences; reach the live `store` for those.
  */
-export interface IndexedDBTransactionStoreInterface {
+export interface IndexedDBTransactionStoreInterface extends IndexedDBRecordStoreInterface {
 	readonly store: IDBObjectStore
-	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<Row | undefined>>
-	get(key: IDBValidKey): Promise<Row | undefined>
-	resolve(keys: readonly IDBValidKey[]): Promise<readonly Row[]>
-	resolve(key: IDBValidKey): Promise<Row>
-	records(query?: IDBKeyRange | IDBValidKey | null, count?: number): Promise<readonly Row[]>
-	keys(query?: IDBKeyRange | IDBValidKey | null, count?: number): Promise<readonly IDBValidKey[]>
-	has(keys: readonly IDBValidKey[]): Promise<readonly boolean[]>
-	has(key: IDBValidKey): Promise<boolean>
-	count(query?: IDBKeyRange | IDBValidKey | null): Promise<number>
-	set(values: readonly Row[]): Promise<readonly IDBValidKey[]>
-	set(value: Row, key?: IDBValidKey): Promise<IDBValidKey>
-	add(values: readonly Row[]): Promise<readonly IDBValidKey[]>
-	add(value: Row, key?: IDBValidKey): Promise<IDBValidKey>
-	remove(keys: readonly IDBValidKey[]): Promise<void>
-	remove(key: IDBValidKey): Promise<void>
-	clear(): Promise<void>
-	cursor(options?: CursorOptions): Promise<IndexedDBCursorInterface | null>
 }
 
 // === Transaction

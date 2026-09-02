@@ -8,8 +8,6 @@ import {
 	promisifyTransaction,
 	rangeAboveKey,
 	rangeBelowKey,
-	rangeBetweenKeys,
-	rangeExactKey,
 	rangeFromKey,
 	rangePrefix,
 	rangeToKey,
@@ -49,16 +47,6 @@ const teardown = createTeardown()
 afterEach(teardown.destroy)
 
 describe('key-range builders', () => {
-	it('only is a single-value, fully-closed bound', () => {
-		const only = rangeExactKey(5)
-		expect(only.lower).toBe(5)
-		expect(only.upper).toBe(5)
-		expect(only.lowerOpen).toBe(false)
-		expect(only.upperOpen).toBe(false)
-		expect(only.includes(5)).toBe(true)
-		expect(only.includes(6)).toBe(false)
-	})
-
 	it('above / from are lower bounds (exclusive / inclusive)', () => {
 		const above = rangeAboveKey(10)
 		expect(above.lower).toBe(10)
@@ -85,23 +73,6 @@ describe('key-range builders', () => {
 		expect(to.upper).toBe(10)
 		expect(to.upperOpen).toBe(false)
 		expect(to.includes(10)).toBe(true)
-	})
-
-	it('between is a closed range by default, with optional open ends', () => {
-		const closed = rangeBetweenKeys(1, 5)
-		expect(closed.lower).toBe(1)
-		expect(closed.upper).toBe(5)
-		expect(closed.lowerOpen).toBe(false)
-		expect(closed.upperOpen).toBe(false)
-		expect(closed.includes(1)).toBe(true)
-		expect(closed.includes(5)).toBe(true)
-
-		const open = rangeBetweenKeys(1, 5, true, true)
-		expect(open.lowerOpen).toBe(true)
-		expect(open.upperOpen).toBe(true)
-		expect(open.includes(1)).toBe(false)
-		expect(open.includes(5)).toBe(false)
-		expect(open.includes(3)).toBe(true)
 	})
 
 	it('prefix bounds every string with the prefix', () => {

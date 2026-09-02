@@ -134,7 +134,7 @@ describe('IndexedDBTransactionStore — out-of-line keys and cursor', () => {
 		let ids: readonly string[] = []
 		await db.read('users', async (tx) => {
 			const seen = await drainCursor(await tx.store('users').cursor())
-			ids = seen.map((cursor) => String(cursor.value.id))
+			ids = seen.map((cursor) => String(cursor.value?.id))
 		})
 		expect(ids).toEqual(['a', 'b'])
 	})
