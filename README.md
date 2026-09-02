@@ -22,7 +22,7 @@ npm install @orkestrel/indexeddb
 
 Pre-release. The public API is implemented and tested against a real
 Chromium instance; see the
-[guide](https://github.com/orkestrel/indexeddb/blob/main/guides/src/indexeddb.md)
+[guide](https://github.com/orkestrel/indexeddb/blob/main/guides/indexeddb.md)
 for the full surface, patterns, and invariants.
 
 ## Package
