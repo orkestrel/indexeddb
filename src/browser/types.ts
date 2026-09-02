@@ -106,7 +106,7 @@ export interface StoreDefinition {
 export type StoresShape = Readonly<Record<string, StoreDefinition>>
 
 /**
- * Manages the object stores of a version-change upgrade.
+ * The store manager of a version-change upgrade.
  *
  * @remarks
  * Reached as `context.stores` on {@link IndexedDBUpgradeContext}. `names` lists
@@ -133,7 +133,7 @@ export interface IndexedDBUpgradeStoreManagerInterface {
 }
 
 /**
- * Manages the secondary indexes of a version-change upgrade.
+ * The secondary-index manager of a version-change upgrade.
  *
  * @remarks
  * Reached as `context.indexes` on {@link IndexedDBUpgradeContext}. `create` adds
@@ -328,8 +328,8 @@ export interface IndexedDBRecordStoreInterface {
 // === Store
 
 /**
- * An object store — the full keyed CRUD surface, plus index, count, and cursor
- * access.
+ * An object store — the keyed record surface plus the store's own schema metadata and
+ * `index` accessor.
  *
  * @remarks
  * {@link IndexedDBRecordStoreInterface} plus the store's own schema metadata and

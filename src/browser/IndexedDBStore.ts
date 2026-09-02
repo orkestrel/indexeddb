@@ -74,7 +74,7 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 	resolve(key: IDBValidKey): Promise<Row>
 	async resolve(keyOrKeys: IDBValidKey | readonly IDBValidKey[]): Promise<Row | readonly Row[]> {
 		const engine = await this.#engine('readonly')
-		// Overload selection, as in `get` above.
+		// Overload selection, as in the `get` method.
 		if (isArray<IDBValidKey>(keyOrKeys)) return engine.resolve(keyOrKeys)
 		return engine.resolve(keyOrKeys)
 	}
@@ -95,7 +95,7 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 		keyOrKeys: IDBValidKey | readonly IDBValidKey[],
 	): Promise<boolean | readonly boolean[]> {
 		const engine = await this.#engine('readonly')
-		// Overload selection, as in `get` above.
+		// Overload selection, as in the `get` method.
 		if (isArray<IDBValidKey>(keyOrKeys)) return engine.has(keyOrKeys)
 		return engine.has(keyOrKeys)
 	}
@@ -137,7 +137,7 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 	remove(key: IDBValidKey): Promise<void>
 	async remove(keyOrKeys: IDBValidKey | readonly IDBValidKey[]): Promise<void> {
 		const engine = await this.#engine('readwrite')
-		// Overload selection, as in `get` above.
+		// Overload selection, as in the `get` method.
 		if (isArray<IDBValidKey>(keyOrKeys)) await engine.remove(keyOrKeys)
 		else await engine.remove(keyOrKeys)
 		await promisifyTransaction(engine.store.transaction)

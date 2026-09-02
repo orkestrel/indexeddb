@@ -103,6 +103,8 @@ A database connects **lazily**: the first store operation (or an explicit `conne
 
 The public methods of each behavioral interface — one table per type, keyed by its backticked name, every call-signature member listed (its `readonly` data members, e.g. `name` / `path` / `value` / `stores`, stay in the Surface rows above). Each class implements its interface exactly, so this doubles as the per-instance method surface (AGENTS §22).
 
+`IndexedDBUpgradeContext` carries only readonly data — `transaction` / `old` / `version` / `stores` / `indexes` — so its Surface row earlier in this guide lists them and no Methods table follows for it. Its managers carry the upgrade's schema verbs: `context.stores` is the store manager, whose name list is `names`, while `IndexedDBDatabaseInterface.stores` is the plain name list.
+
 #### `IndexedDBDatabaseInterface`
 
 | Method    | Returns                   | Behavior                                                                 |
@@ -116,7 +118,7 @@ The public methods of each behavioral interface — one table per type, keyed by
 
 #### `IndexedDBRecordStoreInterface`
 
-The keyed record surface `IndexedDBStoreInterface` and `IndexedDBTransactionStoreInterface` both extend, declared once so neither can drift from the other. The keyed verbs batch by their array overload (one in → one out; array in → array out), array-first (AGENTS §9.2). Each extending table below repeats these rows, because a consumer holding either interface calls them on it.
+The keyed record surface `IndexedDBStoreInterface` and `IndexedDBTransactionStoreInterface` both extend, declared once so neither can drift from the other. The keyed verbs batch by their array overload (one in → one out; array in → array out), array-first (AGENTS §9.2). Each extending table that follows repeats these rows, because a consumer holding either interface calls them on it.
 
 | Method    | Returns                                     | Behavior                                              |
 | --------- | ------------------------------------------- | ----------------------------------------------------- |
@@ -199,8 +201,6 @@ The keyed record surface `IndexedDBStoreInterface` and `IndexedDBTransactionStor
 | `remove`  | `Promise<void>`                             | Delete by key (array → batch).                      |
 | `clear`   | `Promise<void>`                             | Empty the store.                                    |
 | `cursor`  | `Promise<IndexedDBCursorInterface \| null>` | Open a cursor within the transaction.               |
-
-`IndexedDBUpgradeContext` itself carries only readonly data — `transaction` / `old` / `version` / `stores` / `indexes` — so its rows stay in the Surface tables above. Its managers carry the upgrade's schema verbs.
 
 #### `IndexedDBUpgradeStoreManagerInterface`
 

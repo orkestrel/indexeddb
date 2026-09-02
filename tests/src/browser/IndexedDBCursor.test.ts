@@ -179,6 +179,8 @@ describe('IndexedDBCursor — non-record values', () => {
 		})
 		const seen = await drainCursor(await db.store('store').cursor())
 		expect(seen.map((step) => step.value)).toEqual([{ id: 'record' }, undefined])
+		expect(seen.map((step) => step.key)).toEqual(['a', 'b'])
+		expect(seen.map((step) => step.primary)).toEqual(['a', 'b'])
 		expect(await db.store('store').get('b')).toBeUndefined()
 	})
 })
