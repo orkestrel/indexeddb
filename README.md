@@ -13,10 +13,10 @@ npm install @orkestrel/indexeddb
 
 ## Requirements
 
-- Node.js >= 24 (build/test tooling)
+- Node.js >= 22.12.0 (build/test tooling)
 - ESM-only (no CommonJS build)
 - A browser environment with `IndexedDB` (feature-detect with
-  `isIndexedDBSupported` before opening a database)
+  `supportsIndexedDB` before opening a database)
 
 ## Status
 

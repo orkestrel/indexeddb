@@ -1,6 +1,6 @@
-import { isRecord } from '@orkestrel/contract'
 import type { IndexedDBCursorInterface, Row } from './types.js'
-import { guardSync, promisifyRequest } from './helpers.js'
+import { isRecord } from '@orkestrel/contract'
+import { promisifyRequest, wrapCall } from './helpers.js'
 
 /**
  * Represents a promisified value cursor over an object store or index.
@@ -12,9 +12,21 @@ import { guardSync, promisifyRequest } from './helpers.js'
  * stored value with `isRecord` and is `undefined` when that value is not a
  * record, the same absence `readRecord` reports. `continue` / `seek` /
  * `advance` re-arm the shared request and resolve to the next position (a fresh
- * `IndexedDBCursor`) or `null` at the end. `update` / `delete` act on the current
+ * `IndexedDBCursor`) or `null` at the end. `update` / `remove` act on the current
  * record — they require the cursor's transaction to be `readwrite` (a `store`
  * cursor), so they reject on an `index` cursor's read-only transaction.
+ *
+ * @example
+ * ```ts
+ * import { IndexedDBCursor, promisifyRequest } from '@orkestrel/indexeddb'
+ *
+ * // The open request and its first result — the pair `store.cursor()` builds
+ * // internally, over a live `IDBDatabase` a consumer already holds.
+ * const request = database.transaction(['users'], 'readwrite').objectStore('users').openCursor()
+ * const native = await promisifyRequest(request)
+ * const cursor = native === null ? null : new IndexedDBCursor(native, request)
+ * if (cursor?.value) await cursor.update({ ...cursor.value, seen: true })
+ * ```
  */
 export class IndexedDBCursor implements IndexedDBCursorInterface {
 	readonly #cursor: IDBCursorWithValue
@@ -58,7 +70,7 @@ export class IndexedDBCursor implements IndexedDBCursorInterface {
 	}
 
 	async continue(key?: IDBValidKey): Promise<IndexedDBCursorInterface | null> {
-		guardSync(() => {
+		wrapCall(() => {
 			if (key === undefined) this.#cursor.continue()
 			else this.#cursor.continue(key)
 		})
@@ -66,23 +78,23 @@ export class IndexedDBCursor implements IndexedDBCursorInterface {
 	}
 
 	async seek(key: IDBValidKey, primary: IDBValidKey): Promise<IndexedDBCursorInterface | null> {
-		guardSync(() => this.#cursor.continuePrimaryKey(key, primary))
+		wrapCall(() => this.#cursor.continuePrimaryKey(key, primary))
 		return this.#next()
 	}
 
 	async advance(count: number): Promise<IndexedDBCursorInterface | null> {
-		guardSync(() => this.#cursor.advance(count))
+		wrapCall(() => this.#cursor.advance(count))
 		return this.#next()
 	}
 
 	async update(value: Row): Promise<IDBValidKey> {
-		const key = await promisifyRequest(guardSync(() => this.#cursor.update(value)))
+		const key = await promisifyRequest(wrapCall(() => this.#cursor.update(value)))
 		this.#value = value
 		return key
 	}
 
-	async delete(): Promise<void> {
-		await promisifyRequest(guardSync(() => this.#cursor.delete()))
+	async remove(): Promise<void> {
+		await promisifyRequest(wrapCall(() => this.#cursor.delete()))
 	}
 
 	// Await the shared request after a move, wrapping the next position (or null).

@@ -346,7 +346,7 @@ describe('IndexedDBDatabase — store accessor', () => {
 		expect(users.name).toBe('users')
 		expect(users.path).toBe('id')
 
-		// A widened handle (default `StoresShape`) lets `store` take any name, so the
+		// A widened handle (default `IndexedDBSchema`) lets `store` take any name, so the
 		// runtime NOT_FOUND guard is reachable — the literal-keyed generic would
 		// reject `'ghost'` at compile time before it ever runs.
 		const widened: IndexedDBDatabaseInterface = db
@@ -363,9 +363,9 @@ describe('IndexedDBDatabase — read / write scopes', () => {
 			posts: { path: 'id' },
 		})
 		teardown.add(cleanup)
-		await db.write(['users', 'posts'], async (tx) => {
-			await tx.store('users').set({ id: 'u1', name: 'Ada' })
-			await tx.store('posts').set({ id: 'p1', author: 'u1' })
+		await db.write(['users', 'posts'], async (transaction) => {
+			await transaction.store('users').set({ id: 'u1', name: 'Ada' })
+			await transaction.store('posts').set({ id: 'p1', author: 'u1' })
 		})
 		expect(await db.store('users').get('u1')).toEqual({ id: 'u1', name: 'Ada' })
 		expect(await db.store('posts').get('p1')).toEqual({ id: 'p1', author: 'u1' })
@@ -376,9 +376,9 @@ describe('IndexedDBDatabase — read / write scopes', () => {
 		teardown.add(cleanup)
 		await db.store('users').set({ id: 'u1', n: 1 })
 		const caught = await db
-			.write('users', async (tx) => {
-				await tx.store('users').set({ id: 'u1', n: 2 })
-				await tx.store('users').set({ id: 'u2', n: 9 })
+			.write('users', async (transaction) => {
+				await transaction.store('users').set({ id: 'u1', n: 2 })
+				await transaction.store('users').set({ id: 'u2', n: 9 })
 				throw new Error('boom')
 			})
 			.catch((error: unknown) => error)
@@ -395,8 +395,8 @@ describe('IndexedDBDatabase — read / write scopes', () => {
 		// after, so `write` resolves instead of hanging forever.
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
-		await db.write('users', async (tx) => {
-			await tx.store('users').set({ id: 'u1', name: 'Ada' })
+		await db.write('users', async (transaction) => {
+			await transaction.store('users').set({ id: 'u1', name: 'Ada' })
 			await waitForDelay(10) // non-IDB await — the transaction auto-commits here
 		})
 		expect(await db.store('users').get('u1')).toEqual({ id: 'u1', name: 'Ada' })
@@ -407,8 +407,8 @@ describe('IndexedDBDatabase — read / write scopes', () => {
 		teardown.add(cleanup)
 		await db.store('users').set({ id: 'u1', name: 'Ada' })
 		let found: unknown
-		await db.read('users', async (tx) => {
-			found = await tx.store('users').get('u1')
+		await db.read('users', async (transaction) => {
+			found = await transaction.store('users').get('u1')
 		})
 		expect(found).toEqual({ id: 'u1', name: 'Ada' })
 	})
@@ -677,7 +677,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		await promisifyTransaction(read)
 	})
 
-	it('migrates data within the upgrade transaction through context.stores.open', async () => {
+	it('migrates data within the upgrade transaction through context.stores.store', async () => {
 		const name = uniqueName()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
@@ -693,7 +693,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			version: 2,
 			stores: { users: { path: 'id' } },
 			upgrade: async (context) => {
-				const store = context.stores.open('users')
+				const store = context.stores.store('users')
 				const rows = await store.records()
 				for (const row of rows) {
 					const nameValue = typeof row.name === 'string' ? row.name.toUpperCase() : row.name
@@ -724,7 +724,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			version: 2,
 			stores: { users: { path: 'id' } },
 			upgrade: async (context) => {
-				const store = context.stores.open('users')
+				const store = context.stores.store('users')
 				// Await a real IDB request first, so the versionchange transaction is
 				// still alive when the throw below happens.
 				await store.records()

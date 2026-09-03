@@ -1,7 +1,8 @@
-import type { IndexDefinition, StoreDefinition, StoresShape } from '@src/browser'
-import { ERROR_CODES, IndexedDBError } from '@src/browser'
+import type { IndexDefinition, IndexedDBSchema, StoreDefinition } from '@src/browser'
+import { createIndexedDBDatabase, ERROR_CODES, IndexedDBError } from '@src/browser'
 import { describe, expect, it } from 'vitest'
 import {
+	createDatabaseCleanup,
 	drainCursor,
 	errorCode,
 	SEED_STORE_STORES,
@@ -15,8 +16,9 @@ import {
 // The `setup` project runs in Node with the browser disabled, so this file proves the module's
 // host-independent half only: `uniqueName`, arithmetic over a module counter; `errorCode`, an
 // `instanceof` narrowing over a caught value; `drainCursor`'s empty-source contract, the one
-// branch it takes before any cursor exists; and the `SEED_USER_STORES` / `SEED_STORE_STORES`
-// schema tables, which are frozen plain data.
+// branch it takes before any cursor exists; `createDatabaseCleanup`, which returns its cleanup
+// without reaching storage; and the `SEED_USER_STORES` / `SEED_STORE_STORES` schema tables,
+// which are frozen plain data.
 //
 // The DOM-driving half reads `globalThis.indexedDB` and a live `IDBDatabase` that no Node
 // project has, and each export in it is proven by the consuming browser suites that drive it
@@ -24,7 +26,8 @@ import {
 //
 // - `dropDatabase` by `tests/src/browser/IndexedDBDatabase.test.ts`,
 //   `tests/src/browser/factories.test.ts`, and `tests/src/browser/helpers.test.ts`;
-// - `createTestDatabase` by `tests/src/browser/IndexedDBDatabase.test.ts`,
+// - `createTestDatabase`, and with it the cleanup `createDatabaseCleanup` returns, by
+//   `tests/src/browser/IndexedDBDatabase.test.ts`,
 //   `tests/src/browser/IndexedDBStore.test.ts`, `tests/src/browser/IndexedDBIndex.test.ts`,
 //   `tests/src/browser/IndexedDBCursor.test.ts`,
 //   `tests/src/browser/IndexedDBTransaction.test.ts`,
@@ -57,7 +60,7 @@ function readIndexes(definition: StoreDefinition): Record<string, readonly [unkn
 }
 
 /** The store names a schema table declares, sorted. */
-function readStores(stores: StoresShape): readonly string[] {
+function readStores(stores: IndexedDBSchema): readonly string[] {
 	return Object.keys(stores).sort()
 }
 
@@ -104,6 +107,18 @@ describe('errorCode', () => {
 describe('drainCursor', () => {
 	it('collects nothing from an empty source, rather than throwing on the null cursor', async () => {
 		expect(await drainCursor(null)).toEqual([])
+	})
+})
+
+describe('createDatabaseCleanup', () => {
+	it('returns its cleanup without reaching storage', () => {
+		// `createIndexedDBDatabase` connects lazily and touches `globalThis.indexedDB` only
+		// inside `connect()`, so the handle this builds exists under a Node project with no
+		// storage at all. What the cleanup then does is proven by every browser suite that
+		// opens a database through `createTestDatabase` and tears it down.
+		const name = uniqueName('indexeddb-cleanup')
+		const db = createIndexedDBDatabase({ name, stores: SEED_STORE_STORES })
+		expect(typeof createDatabaseCleanup(db, name)).toBe('function')
 	})
 })
 

@@ -6,7 +6,7 @@ import { createTestDatabase, drainCursor, errorCode, seedStore } from '../../set
 // `IndexedDBCursorInterface` in real Chromium, obtained from a store or index
 // cursor: the position snapshot (`cursor` / `source` / `key` / `primary` /
 // `value` / `direction`), the moves (`continue` / `seek` / `advance`), the
-// in-place `update` / `delete`, and the `isRecord` boundary that reports a
+// in-place `update` / `remove`, and the `isRecord` boundary that reports a
 // non-record stored value as `undefined`. The position is read eagerly at construction
 // because IndexedDB reuses the live cursor object on advance, so we assert it
 // against the recorded `IndexedDBCursor`, not a re-read. Each test opens a
@@ -17,7 +17,8 @@ const teardown = createTeardown()
 afterEach(teardown.destroy)
 
 // The plain `users` seed (primary key `id`, three numbered rows) lives in
-// `setupBrowser.ts` (§16.1); each call adds its cleanup to this file's
+// `setupBrowser.ts` (`.claude/rules/tests.md` § Shared test infrastructure);
+// each call adds its cleanup to this file's
 // `teardown` list.
 const seed = (): ReturnType<typeof seedStore> => seedStore(teardown)
 
@@ -97,15 +98,30 @@ describe('IndexedDBCursor — moves', () => {
 		expect(sought?.primary).toBe('c')
 		expect(sought?.value).toEqual({ id: 'c', age: 30 })
 	})
+
+	it('rejects seek on a store cursor, whose source is not an index', async () => {
+		// `continuePrimaryKey` is defined for an index cursor alone, so the native
+		// call raises on a store cursor. `src/browser/types.ts` and the guide
+		// publish the code a consumer catches here, so this case drives the move
+		// and reads what Chromium actually produces rather than what the
+		// specification implies.
+		const db = await seed()
+		const cursor = await db.store('users').cursor()
+		expect(cursor).not.toBeNull()
+		if (!cursor) return
+		const onSeek = await cursor.seek('a', 'a').catch((error: unknown) => error)
+		expect(onSeek).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(onSeek)).toBe('UNKNOWN')
+	})
 })
 
 describe('IndexedDBCursor — in-place mutation', () => {
-	it('updates and deletes the record at the current position', async () => {
+	it('updates and removes the record at the current position', async () => {
 		const db = await seed()
 		let cursor = await db.store('users').cursor()
 		while (cursor) {
 			const row = requireValue(cursor.value, 'cursor value')
-			if (row.id === 'b') await cursor.delete()
+			if (row.id === 'b') await cursor.remove()
 			else await cursor.update({ ...row, n: Number(row.n) * 10 })
 			cursor = await cursor.continue()
 		}
@@ -141,21 +157,21 @@ describe('IndexedDBCursor — in-place mutation', () => {
 		expect(await db.store('users').get('a')).toEqual({ id: 'a', age: 20 })
 	})
 
-	it('rejects delete on an index cursor with READONLY (its transaction is readonly)', async () => {
+	it('rejects remove on an index cursor with READONLY (its transaction is readonly)', async () => {
 		const { db, cleanup } = await createTestDatabase({
 			users: { path: 'id', indexes: [{ name: 'byAge', path: 'age' }] },
 		})
 		teardown.add(cleanup)
 		await db.store('users').set({ id: 'a', age: 20 })
-		// A fresh cursor for `delete` — a failed `update` above can invalidate its
-		// own cursor/request, so `delete` is asserted on an independent cursor
+		// A fresh cursor for `remove` — a failed `update` earlier can invalidate its
+		// own cursor/request, so `remove` is asserted on an independent cursor
 		// rather than chained after a failed `update` on the same one.
 		const cursor = await db.store('users').index('byAge').cursor()
 		expect(cursor).not.toBeNull()
 		if (!cursor) return
-		const onDelete = await cursor.delete().catch((error: unknown) => error)
-		expect(onDelete).toBeInstanceOf(IndexedDBError)
-		expect(errorCode(onDelete)).toBe('READONLY')
+		const onRemove = await cursor.remove().catch((error: unknown) => error)
+		expect(onRemove).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(onRemove)).toBe('READONLY')
 		expect(await db.store('users').get('a')).toEqual({ id: 'a', age: 20 })
 	})
 })
@@ -165,6 +181,24 @@ describe('IndexedDBCursor — ranges', () => {
 		const db = await seed()
 		const seen = await drainCursor(await db.store('users').cursor({ query: rangeFromKey('b') }))
 		expect(seen.map((step) => step.value?.id)).toEqual(['b', 'c'])
+	})
+})
+
+describe('IndexedDBCursor — long walks over one re-armed request', () => {
+	it('walks every record in key order across as many re-arms of one shared request', async () => {
+		// A walk drives ONE `IDBRequest`, re-armed by each move, and every move adds
+		// a listener pair through `promisifyRequest`. No assertion in this suite can
+		// observe a listener count, so the detachment `promisifyRequest` performs is
+		// an internal correctness change; what this case pins is the walk's result
+		// over enough re-arms that a stale listener resolving an already-settled
+		// promise would show up as a wrong or short traversal.
+		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
+		teardown.add(cleanup)
+		const ids = Array.from({ length: 24 }, (_, index) => `u${String(index).padStart(2, '0')}`)
+		await db.store('users').set(ids.map((id) => ({ id })))
+		const seen = await drainCursor(await db.store('users').cursor())
+		expect(seen.map((cursor) => cursor.value?.id)).toEqual(ids)
+		expect(seen.map((cursor) => cursor.key)).toEqual(ids)
 	})
 })
 

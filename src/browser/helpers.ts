@@ -4,7 +4,7 @@ import { ERROR_CODES } from './constants.js'
 import { IndexedDBError } from './errors.js'
 
 // The browser surface's cross-cutting helpers: the feature-detection probe a
-// consumer runs *before* entering the rest of this module (`isIndexedDBSupported`,
+// consumer runs *before* entering the rest of this module (`supportsIndexedDB`,
 // to fall back to another storage strategy where storage is absent), and the
 // wrapper's foundation — the two Promise bridges every class builds on
 // (`IDBRequest` → value, `IDBTransaction` → completion), the key-range builders
@@ -23,7 +23,7 @@ import { IndexedDBError } from './errors.js'
  *
  * @returns True if `globalThis.indexedDB` exists; false otherwise
  */
-export function isIndexedDBSupported(): boolean {
+export function supportsIndexedDB(): boolean {
 	return typeof globalThis.indexedDB !== 'undefined'
 }
 
@@ -40,13 +40,34 @@ export function isIndexedDBSupported(): boolean {
  */
 export function promisifyRequest<T>(request: IDBRequest<T>): Promise<T> {
 	return new Promise((resolve, reject) => {
-		request.addEventListener('success', () => resolve(request.result))
-		request.addEventListener('error', () => reject(wrapError(request.error)))
+		// One `AbortController` over both listeners, aborted by whichever settles the
+		// promise: `IndexedDBCursor` re-arms ONE shared `IDBRequest` for a whole walk,
+		// so listeners that outlive their own settlement accumulate on that request
+		// for the owning transaction's life and still run on every later firing.
+		// `{ once: true }` does not close this — it removes only the listener that
+		// fired and leaves its sibling attached, so the growth stays linear.
+		const settled = new AbortController()
+		request.addEventListener(
+			'success',
+			() => {
+				settled.abort()
+				resolve(request.result)
+			},
+			{ signal: settled.signal },
+		)
+		request.addEventListener(
+			'error',
+			() => {
+				settled.abort()
+				reject(wrapError(request.error))
+			},
+			{ signal: settled.signal },
+		)
 	})
 }
 
 /**
- * Resolves once an `IDBTransaction` commits, rejecting if it errors or aborts.
+ * Resolves after an `IDBTransaction` commits, rejecting if it errors or aborts.
  *
  * @remarks
  * Await this after issuing the writes of a `readwrite` transaction to guarantee
@@ -82,7 +103,7 @@ export function promisifyTransaction(transaction: IDBTransaction): Promise<void>
  * @param action - The synchronous native call to run
  * @returns Its return value
  */
-export function guardSync<T>(action: () => T): T {
+export function wrapCall<T>(action: () => T): T {
 	try {
 		return action()
 	} catch (error) {
@@ -109,7 +130,7 @@ export async function readRecord(
 	source: IDBObjectStore | IDBIndex,
 	key: IDBValidKey,
 ): Promise<Row | undefined> {
-	const value = await promisifyRequest<unknown>(guardSync(() => source.get(key)))
+	const value = await promisifyRequest<unknown>(wrapCall(() => source.get(key)))
 	return isRecord(value) ? value : undefined
 }
 
@@ -132,7 +153,7 @@ export async function readRecords(
 	query?: IDBKeyRange | IDBValidKey,
 	count?: number,
 ): Promise<readonly Row[]> {
-	const all = await promisifyRequest<unknown[]>(guardSync(() => source.getAll(query, count)))
+	const all = await promisifyRequest<unknown[]>(wrapCall(() => source.getAll(query, count)))
 	return all.filter(isRecord)
 }
 
@@ -152,7 +173,7 @@ export async function hasKey(
 	source: IDBObjectStore | IDBIndex,
 	key: IDBValidKey,
 ): Promise<boolean> {
-	return (await promisifyRequest(guardSync(() => source.count(key)))) > 0
+	return (await promisifyRequest(wrapCall(() => source.count(key)))) > 0
 }
 
 /**

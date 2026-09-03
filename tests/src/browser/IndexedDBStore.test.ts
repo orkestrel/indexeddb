@@ -1,4 +1,4 @@
-import { IndexedDBError, rangeFromKey, rangePrefix } from '@src/browser'
+import { IndexedDBError, isIndexedDBError, rangeFromKey, rangePrefix } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import { captureError, createTeardown } from '@orkestrel/test'
 import { createTestDatabase, drainCursor, errorCode } from '../../setupBrowser.js'
@@ -75,6 +75,22 @@ describe('IndexedDBStore — keyed CRUD', () => {
 		const caught = await users.resolve('nope').catch((error: unknown) => error)
 		expect(caught).toBeInstanceOf(IndexedDBError)
 		expect(errorCode(caught)).toBe('NOT_FOUND')
+	})
+
+	it('reports the store and key of a resolve miss as machine-readable context', async () => {
+		// The message states the same two facts; `context` is what a caller branches
+		// on without parsing it.
+		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
+		teardown.add(cleanup)
+		const caught = await db
+			.store('users')
+			.resolve('ghost')
+			.catch((error: unknown) => error)
+		expect(isIndexedDBError(caught)).toBe(true)
+		expect(isIndexedDBError(caught) ? caught.context : undefined).toEqual({
+			store: 'users',
+			key: 'ghost',
+		})
 	})
 
 	it('set upserts (overwrites) while add rejects a duplicate with CONSTRAINT', async () => {

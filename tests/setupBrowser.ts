@@ -6,16 +6,17 @@
 import type {
 	IndexedDBCursorInterface,
 	IndexedDBDatabaseInterface,
-	StoresShape,
+	IndexedDBSchema,
 } from '@src/browser'
-import { createIndexedDBDatabase, IndexedDBError } from '@src/browser'
 import type { TeardownInterface } from '@orkestrel/test'
+import { createIndexedDBDatabase, IndexedDBError } from '@src/browser'
 import { waitForDelay } from '@orkestrel/test'
 
 // ── IndexedDB test fixtures (real Chromium, real `indexedDB`) ────────────────
 //
 // The shared open-a-database boilerplate every `src/browser` test reuses
-// (AGENTS §16.1): a unique database name per call, a connected handle over a
+// (`.claude/rules/tests.md` § Shared test infrastructure): a unique database
+// name per call, a connected handle over a
 // caller-supplied store schema, and a cleanup that closes the connection and
 // deletes the database — so the suite is order- and rerun-independent without a
 // per-file local opener. Each test keeps only its file-specific store / index
@@ -81,7 +82,7 @@ export function uniqueName(prefix = 'terrain-idb'): string {
 }
 
 /** A connected test database plus the boilerplate to identify and dispose it. */
-export interface TestDatabaseInterface<Stores extends StoresShape> {
+export interface TestDatabaseInterface<Stores extends IndexedDBSchema> {
 	/** The IndexedDB handle, already `connect`ed and ready to use. */
 	readonly db: IndexedDBDatabaseInterface<Stores>
 	/** The unique name the database was opened under (for reopen / drop tests). */
@@ -91,16 +92,43 @@ export interface TestDatabaseInterface<Stores extends StoresShape> {
 }
 
 /**
+ * Builds the cleanup that disposes a test database: it closes the connection,
+ * then deletes the database under the name it was opened with.
+ *
+ * @param db - The handle to close
+ * @param name - The database name to delete
+ * @returns A cleanup closing `db` and deleting `name`
+ *
+ * @remarks
+ * A module-scope factory rather than a closure assigned inside
+ * {@link createTestDatabase}: `.claude/rules/architecture.md` § Functions and
+ * orchestration permits an anonymous function returned directly as the result and
+ * bans one assigned to a local binding. The returned cleanup carries the same
+ * blocked-deletion contract {@link dropDatabase} states.
+ */
+export function createDatabaseCleanup<Stores extends IndexedDBSchema>(
+	db: IndexedDBDatabaseInterface<Stores>,
+	name: string,
+): () => Promise<void> {
+	return async () => {
+		db.close()
+		await dropDatabase(name)
+	}
+}
+
+/**
  * Open a fresh, connected IndexedDB database over a store schema, under a unique
- * name, returning the handle and a cleanup — the shared opener for every browser test (AGENTS §16.1). The handle is already connected, so a test can
- * reach `db.store(...)` immediately; `cleanup` closes and deletes it.
+ * name, returning the handle and a cleanup — the shared opener for every browser
+ * test (`.claude/rules/tests.md` § Shared test infrastructure). The handle is
+ * already connected, so a test can reach `db.store(...)` immediately; `cleanup`
+ * closes and deletes it.
  *
  * @param stores - The store schema (file-specific store / index definitions)
  * @param options - `version` pins an explicit schema version (omit for
  *   auto-managed mode); `prefix` names the database for readable diagnostics
  * @returns The connected database, its name, and a cleanup
  */
-export async function createTestDatabase<const Stores extends StoresShape>(
+export async function createTestDatabase<const Stores extends IndexedDBSchema>(
 	stores: Stores,
 	options?: { readonly version?: number; readonly prefix?: string },
 ): Promise<TestDatabaseInterface<Stores>> {
@@ -111,11 +139,7 @@ export async function createTestDatabase<const Stores extends StoresShape>(
 		stores,
 	})
 	await db.connect()
-	const cleanup = async (): Promise<void> => {
-		db.close()
-		await dropDatabase(name)
-	}
-	return { db, name, cleanup }
+	return { db, name, cleanup: createDatabaseCleanup(db, name) }
 }
 
 /**
@@ -154,7 +178,8 @@ export function errorCode(value: unknown): string | undefined {
 // ── IndexedDB seed fixtures (the common stores every wrapper test starts from) ─
 //
 // The near-duplicate seed-a-`users`-store openers the `src/browser` tests
-// reuse (AGENTS §16.1): each opens a uniquely-named database via
+// reuse (`.claude/rules/tests.md` § Shared test infrastructure): each opens a
+// uniquely-named database via
 // {@link createTestDatabase}, sets the rows, and adds its `cleanup` to the
 // caller's `createTeardown()` list (which the file destroys from an `afterEach`).
 // The seed returns just the connected `db`.
@@ -169,12 +194,12 @@ export const SEED_USER_STORES = {
 			{ name: 'byEmail', path: 'email', unique: true },
 		],
 	},
-} as const satisfies StoresShape
+} as const satisfies IndexedDBSchema
 
 /** The store schema {@link seedStore} opens — a plain `users` store keyed by `id`. */
 export const SEED_STORE_STORES = {
 	users: { path: 'id' },
-} as const satisfies StoresShape
+} as const satisfies IndexedDBSchema
 
 /**
  * Seed a `users` store keyed by `id` with a non-unique `byAge` index and a unique

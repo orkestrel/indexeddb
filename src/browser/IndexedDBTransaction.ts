@@ -1,10 +1,10 @@
 import type {
+	IndexedDBSchema,
 	IndexedDBTransactionInterface,
 	IndexedDBTransactionStoreInterface,
-	StoresShape,
 } from './types.js'
 import { IndexedDBError } from './errors.js'
-import { guardSync } from './helpers.js'
+import { wrapCall } from './helpers.js'
 import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
 
 /**
@@ -16,9 +16,22 @@ import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
  * roll it back on a throw). `store` reaches a store within the transaction's scope;
  * `abort` rolls back; `commit` flushes early (the scope's completion commits
  * otherwise). `active` is true until commit or abort; `finished` is its complement.
+ *
+ * @example
+ * ```ts
+ * import { IndexedDBTransaction } from '@orkestrel/indexeddb'
+ *
+ * // A raw multi-store transaction over a live `IDBDatabase` a consumer holds —
+ * // the value `db.write(stores, scope)` opens and hands to its scope.
+ * const native = database.transaction(['users', 'posts'], 'readwrite')
+ * const transaction = new IndexedDBTransaction(native)
+ * await transaction.store('users').set({ id: 'u1', name: 'Ada' })
+ * transaction.commit()
+ * transaction.finished // true
+ * ```
  */
 export class IndexedDBTransaction<
-	Stores extends StoresShape = StoresShape,
+	Stores extends IndexedDBSchema = IndexedDBSchema,
 > implements IndexedDBTransactionInterface<Stores> {
 	readonly #transaction: IDBTransaction
 	readonly #stores: readonly string[]
@@ -67,12 +80,16 @@ export class IndexedDBTransaction<
 			throw new IndexedDBError(
 				'NOT_FOUND',
 				`Store '${name}' is outside this transaction's scope (${this.#stores.join(', ')})`,
+				undefined,
+				{ store: name, scope: this.#stores },
 			)
 		}
 		if (this.#finished) {
 			throw new IndexedDBError(
 				'ABORTED',
 				`Transaction over ${this.#stores.join(', ')} is no longer active`,
+				undefined,
+				{ store: name, scope: this.#stores },
 			)
 		}
 		return new IndexedDBTransactionStore(this.#transaction.objectStore(name))
@@ -86,7 +103,7 @@ export class IndexedDBTransaction<
 		if (this.#finished) {
 			throw new IndexedDBError('INACTIVE', 'Cannot abort an already-finished transaction')
 		}
-		guardSync(() => this.#transaction.abort())
+		wrapCall(() => this.#transaction.abort())
 		this.#finished = true
 	}
 
@@ -94,7 +111,8 @@ export class IndexedDBTransaction<
 		if (this.#finished) {
 			throw new IndexedDBError('INACTIVE', 'Cannot commit an already-finished transaction')
 		}
-		guardSync(() => this.#transaction.commit())
+		wrapCall(() => this.#transaction.commit())
+		this.#finished = true
 	}
 
 	#settle(): void {

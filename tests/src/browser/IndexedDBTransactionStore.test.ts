@@ -5,7 +5,7 @@ import { createTeardown, waitForDelay } from '@orkestrel/test'
 import { createTestDatabase, drainCursor, errorCode } from '../../setupBrowser.js'
 
 // `IndexedDBTransactionStoreInterface` in real Chromium, reached through
-// `tx.store(name)` inside a `db.read` / `db.write` scope: the live `store`
+// `transaction.store(name)` inside a `db.read` / `db.write` scope: the live `store`
 // getter, the same keyed CRUD surface as a standalone store (with array-first
 // batch overloads, key ranges, and a `cursor`) but bound to the owning
 // transaction — so a sequence of reads and writes is atomic — and WITHOUT
@@ -19,8 +19,8 @@ describe('IndexedDBTransactionStore — store handle', () => {
 	it('exposes the live native object store', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
-		await db.read('users', (tx) => {
-			const bound = tx.store('users')
+		await db.read('users', (transaction) => {
+			const bound = transaction.store('users')
 			expect(bound.store).toBeInstanceOf(IDBObjectStore)
 			expect(bound.store.name).toBe('users')
 		})
@@ -34,8 +34,8 @@ describe('IndexedDBTransactionStore — CRUD within a scope', () => {
 		let seen: unknown
 		let present = false
 		let total = 0
-		await db.write('users', async (tx) => {
-			const users = tx.store('users')
+		await db.write('users', async (transaction) => {
+			const users = transaction.store('users')
 			await users.set({ id: 'u1', name: 'Ada' })
 			// Same transaction — the write is visible before the scope commits.
 			seen = await users.get('u1')
@@ -53,8 +53,8 @@ describe('IndexedDBTransactionStore — CRUD within a scope', () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
 		let caught: unknown
-		await db.read('users', async (tx) => {
-			caught = await tx
+		await db.read('users', async (transaction) => {
+			caught = await transaction
 				.store('users')
 				.resolve('nope')
 				.catch((error: unknown) => error)
@@ -69,8 +69,8 @@ describe('IndexedDBTransactionStore — CRUD within a scope', () => {
 		await db.store('users').set({ id: 'u1' })
 		let caught: unknown
 		await db
-			.write('users', async (tx) => {
-				caught = await tx
+			.write('users', async (transaction) => {
+				caught = await transaction
 					.store('users')
 					.add({ id: 'u1' })
 					.catch((error: unknown) => error)
@@ -83,15 +83,15 @@ describe('IndexedDBTransactionStore — CRUD within a scope', () => {
 	it('lists keys / records over a range and clears within the scope', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
-		await db.write('users', async (tx) => {
-			const users = tx.store('users')
+		await db.write('users', async (transaction) => {
+			const users = transaction.store('users')
 			await users.set([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
 			expect(await users.keys()).toEqual(['a', 'b', 'c'])
 			expect((await users.records(rangeFromKey('b'))).map((row) => row.id)).toEqual(['b', 'c'])
 			expect((await users.records(undefined, 2)).length).toBe(2)
 		})
-		await db.write('users', async (tx) => {
-			await tx.store('users').clear()
+		await db.write('users', async (transaction) => {
+			await transaction.store('users').clear()
 		})
 		expect(await db.store('users').count()).toBe(0)
 	})
@@ -103,8 +103,8 @@ describe('IndexedDBTransactionStore — array-first batch overloads', () => {
 		teardown.add(cleanup)
 		let gotten: unknown
 		let presence: readonly boolean[] = []
-		await db.write('users', async (tx) => {
-			const users = tx.store('users')
+		await db.write('users', async (transaction) => {
+			const users = transaction.store('users')
 			const keys = await users.set([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
 			expect(keys).toEqual(['a', 'b', 'c'])
 			gotten = await users.get(['a', 'missing', 'c'])
@@ -121,8 +121,8 @@ describe('IndexedDBTransactionStore — out-of-line keys and cursor', () => {
 	it('writes out-of-line keys with an explicit key argument', async () => {
 		const { db, cleanup } = await createTestDatabase({ events: {} })
 		teardown.add(cleanup)
-		await db.write('events', async (tx) => {
-			await tx.store('events').set({ type: 'click' }, 'e1')
+		await db.write('events', async (transaction) => {
+			await transaction.store('events').set({ type: 'click' }, 'e1')
 		})
 		expect(await db.store('events').get('e1')).toEqual({ type: 'click' })
 	})
@@ -132,8 +132,8 @@ describe('IndexedDBTransactionStore — out-of-line keys and cursor', () => {
 		teardown.add(cleanup)
 		await db.store('users').set([{ id: 'a' }, { id: 'b' }])
 		let ids: readonly string[] = []
-		await db.read('users', async (tx) => {
-			const seen = await drainCursor(await tx.store('users').cursor())
+		await db.read('users', async (transaction) => {
+			const seen = await drainCursor(await transaction.store('users').cursor())
 			ids = seen.map((cursor) => String(cursor.value?.id))
 		})
 		expect(ids).toEqual(['a', 'b'])
@@ -144,8 +144,8 @@ describe('IndexedDBTransactionStore — out-of-line keys and cursor', () => {
 		teardown.add(cleanup)
 		await db.store('users').set({ id: 'u1', n: 1 })
 		await db
-			.write('users', async (tx) => {
-				const users = tx.store('users')
+			.write('users', async (transaction) => {
+				const users = transaction.store('users')
 				await users.set({ id: 'u1', n: 2 })
 				await users.set({ id: 'u2', n: 9 })
 				throw new Error('boom')
@@ -161,15 +161,15 @@ describe('IndexedDBTransactionStore — synchronous native faults', () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
 		let captured: IndexedDBTransactionStoreInterface | undefined
-		await db.write('users', (tx) => {
+		await db.write('users', (transaction) => {
 			// Capture the transaction-bound store but issue no request on it — the
 			// scope resolves synchronously, so the owning transaction auto-commits
 			// once control returns to the event loop.
-			captured = tx.store('users')
+			captured = transaction.store('users')
 		})
 		// A macrotask past the scope's resolution: the transaction has committed and
 		// gone inactive. `get` issues a synchronous native `IDBObjectStore.get` on a
-		// store whose transaction is no longer active — the wrapper's `guardSync`
+		// store whose transaction is no longer active — the wrapper's `wrapCall`
 		// catches that synchronous `TransactionInactiveError` and rejects with a
 		// typed `IndexedDBError`, never an unhandled throw.
 		await waitForDelay(10)

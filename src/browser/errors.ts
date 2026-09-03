@@ -4,7 +4,7 @@
 // message. It is deliberately richer than the core `DatabaseError`'s four codes:
 // the wrapper sits *below* the core, right on the raw IndexedDB surface, where
 // constraint, quota, and abort faults are all distinct and worth naming
-// (AGENTS §12).
+// (`.claude/rules/typescript.md` § Errors and outcomes).
 
 import type { IndexedDBErrorCode } from './types.js'
 
@@ -18,6 +18,12 @@ import type { IndexedDBErrorCode } from './types.js'
  * request boundary. Narrow a caught value with {@link isIndexedDBError}, this
  * package's own guard.
  *
+ * `context` carries the facts a caller branches on — the database, store, index,
+ * key, or transaction scope the fault names — as machine-readable members beside
+ * `code`, so a `catch` reads them instead of parsing the message that states the
+ * same facts. It is `undefined` where the fault carries none, which is every
+ * error `wrapError` builds: a native `DOMException` already rides as `cause`.
+ *
  * @example
  * ```ts
  * try {
@@ -29,11 +35,18 @@ import type { IndexedDBErrorCode } from './types.js'
  */
 export class IndexedDBError extends Error {
 	readonly code: IndexedDBErrorCode
+	readonly context: Readonly<Record<string, unknown>> | undefined
 
-	constructor(code: IndexedDBErrorCode, message: string, cause?: unknown) {
+	constructor(
+		code: IndexedDBErrorCode,
+		message: string,
+		cause?: unknown,
+		context?: Readonly<Record<string, unknown>>,
+	) {
 		super(message, { cause })
 		this.name = 'IndexedDBError'
 		this.code = code
+		this.context = context
 	}
 }
 

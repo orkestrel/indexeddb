@@ -3,7 +3,6 @@ import {
 	hasKey,
 	IndexedDBError,
 	isIndexedDBError,
-	isIndexedDBSupported,
 	promisifyRequest,
 	promisifyTransaction,
 	rangeAboveKey,
@@ -13,23 +12,28 @@ import {
 	rangeToKey,
 	readRecord,
 	readRecords,
+	supportsIndexedDB,
+	wrapCall,
 	wrapError,
 } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createTeardown } from '@orkestrel/test'
+import { captureError, createTeardown } from '@orkestrel/test'
 import { createTestDatabase, dropDatabase, errorCode, uniqueName } from '../../setupBrowser.js'
 
 // The browser surface's helpers (`src/browser/helpers.ts`), exercised in real
-// Chromium: the feature probe `isIndexedDBSupported` (the entry gate a consumer
+// Chromium: the feature probe `supportsIndexedDB` (the entry gate a consumer
 // runs before entering the rest of this module), the key-range builders
 // asserted on the `IDBKeyRange` bounds they return, the shared read primitives
 // (`readRecord` / `readRecords` / `hasKey`) over a real `IDBObjectStore` /
 // `IDBIndex` reached through a transaction scope — including the `isRecord`
 // boundary that narrows a non-record clone away — the two Promise bridges
 // (`promisifyRequest` / `promisifyTransaction`) against real requests, both
-// success and the `IndexedDBError`-wrapped rejection, and `wrapError` mapping a
-// real `DOMException` (and a `null`) to the right `IndexedDBError` code. Each
-// store-backed test opens a uniquely-named database through the shared opener.
+// success and the `IndexedDBError`-wrapped rejection, `wrapCall` over each of
+// the three paths it can take (a returned value, a thrown `DOMException`, and a
+// throw of anything else), the `context` an `IndexedDBError` carries beside its
+// `code`, and `wrapError` mapping a real `DOMException` (and a `null`) to the
+// right `IndexedDBError` code. Each store-backed test opens a uniquely-named
+// database through the shared opener.
 
 describe('src/browser environment', () => {
 	it('runs in a real browser with a DOM and IndexedDB', () => {
@@ -37,8 +41,8 @@ describe('src/browser environment', () => {
 		expect(typeof globalThis.indexedDB).toBe('object')
 	})
 
-	it('isIndexedDBSupported reports true in the browser', () => {
-		expect(isIndexedDBSupported()).toBe(true)
+	it('supportsIndexedDB reports true in the browser', () => {
+		expect(supportsIndexedDB()).toBe(true)
 	})
 })
 
@@ -92,13 +96,13 @@ describe('readRecord / readRecords / hasKey — over a real store', () => {
 	it('readRecord returns a record, and narrows a non-record clone to undefined', async () => {
 		const { db, cleanup } = await createTestDatabase({ store: {} })
 		teardown.add(cleanup)
-		await db.write('store', async (tx) => {
-			const native = tx.store('store').store
+		await db.write('store', async (transaction) => {
+			const native = transaction.store('store').store
 			await promisifyRequest(native.put({ id: 'r1' }, 'r1'))
 			await promisifyRequest(native.put(42, 'primitive')) // a non-record clone
 		})
-		await db.read('store', async (tx) => {
-			const native = tx.store('store').store
+		await db.read('store', async (transaction) => {
+			const native = transaction.store('store').store
 			expect(await readRecord(native, 'r1')).toEqual({ id: 'r1' })
 			expect(await readRecord(native, 'primitive')).toBeUndefined()
 			expect(await readRecord(native, 'missing')).toBeUndefined()
@@ -108,14 +112,14 @@ describe('readRecord / readRecords / hasKey — over a real store', () => {
 	it('readRecords keeps only records and honours a key range and count', async () => {
 		const { db, cleanup } = await createTestDatabase({ store: {} })
 		teardown.add(cleanup)
-		await db.write('store', async (tx) => {
-			const native = tx.store('store').store
+		await db.write('store', async (transaction) => {
+			const native = transaction.store('store').store
 			await promisifyRequest(native.put({ id: 'a' }, 'a'))
 			await promisifyRequest(native.put(7, 'b')) // a non-record clone, dropped
 			await promisifyRequest(native.put({ id: 'c' }, 'c'))
 		})
-		await db.read('store', async (tx) => {
-			const native = tx.store('store').store
+		await db.read('store', async (transaction) => {
+			const native = transaction.store('store').store
 			expect(await readRecords(native)).toEqual([{ id: 'a' }, { id: 'c' }])
 			expect(await readRecords(native, undefined, 1)).toEqual([{ id: 'a' }])
 			expect(await readRecords(native, rangeFromKey('c'))).toEqual([{ id: 'c' }])
@@ -131,8 +135,8 @@ describe('readRecord / readRecords / hasKey — over a real store', () => {
 			{ id: 'a', age: 20 },
 			{ id: 'b', age: 30 },
 		])
-		await db.read('users', async (tx) => {
-			const index = tx.store('users').store.index('byAge')
+		await db.read('users', async (transaction) => {
+			const index = transaction.store('users').store.index('byAge')
 			expect(await readRecord(index, 30)).toEqual({ id: 'b', age: 30 })
 			expect((await readRecords(index)).map((row) => row.id)).toEqual(['a', 'b'])
 		})
@@ -141,11 +145,11 @@ describe('readRecord / readRecords / hasKey — over a real store', () => {
 	it('hasKey reports presence by a native count', async () => {
 		const { db, cleanup } = await createTestDatabase({ store: {} })
 		teardown.add(cleanup)
-		await db.write('store', async (tx) => {
-			await promisifyRequest(tx.store('store').store.put({ id: 'x' }, 'x'))
+		await db.write('store', async (transaction) => {
+			await promisifyRequest(transaction.store('store').store.put({ id: 'x' }, 'x'))
 		})
-		await db.read('store', async (tx) => {
-			const native = tx.store('store').store
+		await db.read('store', async (transaction) => {
+			const native = transaction.store('store').store
 			expect(await hasKey(native, 'x')).toBe(true)
 			expect(await hasKey(native, 'nope')).toBe(false)
 		})
@@ -205,8 +209,8 @@ describe('promisifyRequest — IDBRequest bridge', () => {
 	it('resolves to the request result on success', async () => {
 		const { db, cleanup } = await createTestDatabase({ store: { path: 'id' } })
 		teardown.add(cleanup)
-		await db.write('store', async (tx) => {
-			const native = tx.store('store').store
+		await db.write('store', async (transaction) => {
+			const native = transaction.store('store').store
 			const key = await promisifyRequest(native.add({ id: 'u1' }))
 			expect(key).toBe('u1')
 			expect(await promisifyRequest(native.count())).toBe(1)
@@ -221,10 +225,10 @@ describe('promisifyRequest — IDBRequest bridge', () => {
 		await db.store('store').set({ id: 'u1' })
 		let caught: unknown
 		await db
-			.write('store', async (tx) => {
+			.write('store', async (transaction) => {
 				// A duplicate `add` faults with a native ConstraintError, which the
 				// bridge wraps as an IndexedDBError(code: 'CONSTRAINT').
-				caught = await promisifyRequest(tx.store('store').store.add({ id: 'u1' })).catch(
+				caught = await promisifyRequest(transaction.store('store').store.add({ id: 'u1' })).catch(
 					(error: unknown) => error,
 				)
 			})
@@ -261,6 +265,38 @@ describe('promisifyTransaction — IDBTransaction bridge', () => {
 	})
 })
 
+describe('wrapCall — synchronous native call boundary', () => {
+	it('returns what the action returned when it does not throw', () => {
+		expect(wrapCall(() => 'the native result')).toBe('the native result')
+		expect(wrapCall(() => 0)).toBe(0)
+	})
+
+	it('wraps a thrown DOMException as the mapped IndexedDBError, keeping it as cause', () => {
+		const native = new DOMException('the transaction is not active', 'TransactionInactiveError')
+		const caught = captureError(() => {
+			return wrapCall(() => {
+				throw native
+			})
+		})
+		expect(caught).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(caught)).toBe('INACTIVE')
+		expect(caught instanceof IndexedDBError ? caught.cause : undefined).toBe(native)
+	})
+
+	it('rethrows a throw that is not a DOMException by identity', () => {
+		// The second path of the one decision the function makes: anything the
+		// request boundary cannot map leaves unchanged, not wrapped in UNKNOWN.
+		const raised = new TypeError('not a native IndexedDB fault')
+		const caught = captureError(() => {
+			return wrapCall(() => {
+				throw raised
+			})
+		})
+		expect(caught).toBe(raised)
+		expect(caught).not.toBeInstanceOf(IndexedDBError)
+	})
+})
+
 describe('wrapError — DOMException → IndexedDBError', () => {
 	it('maps a known DOMException.name to its code, keeping the message and cause', () => {
 		const native = new DOMException('unique key already exists', 'ConstraintError')
@@ -293,6 +329,24 @@ describe('wrapError — DOMException → IndexedDBError', () => {
 		expect(wrapped.code).toBe('UNKNOWN')
 		expect(wrapped.message).toBe('Unknown IndexedDB error')
 		expect(wrapped.cause).toBeUndefined()
+	})
+})
+
+describe('IndexedDBError — machine-readable context', () => {
+	it('reports the context it was constructed with, beside the code', () => {
+		const error = new IndexedDBError('NOT_FOUND', 'no record', undefined, {
+			store: 'users',
+			key: 'ghost',
+		})
+		expect(error.code).toBe('NOT_FOUND')
+		expect(error.context).toEqual({ store: 'users', key: 'ghost' })
+	})
+
+	it('reports undefined for a fault carrying none, wrapError results included', () => {
+		expect(new IndexedDBError('CLOSED', 'the handle is closed').context).toBeUndefined()
+		// A native fault already rides as `cause`, so `wrapError` passes no context.
+		expect(wrapError(new DOMException('duplicate', 'ConstraintError')).context).toBeUndefined()
+		expect(wrapError(null).context).toBeUndefined()
 	})
 })
 

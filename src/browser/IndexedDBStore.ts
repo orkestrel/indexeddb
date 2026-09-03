@@ -1,15 +1,15 @@
-import { isArray } from '@orkestrel/contract'
 import type {
-	CursorOptions,
 	IndexedDBCursorInterface,
+	IndexedDBCursorOptions,
 	IndexedDBIndexInterface,
 	IndexedDBStoreInterface,
 	KeyPath,
 	Row,
 	StoreDefinition,
 } from './types.js'
+import { isArray } from '@orkestrel/contract'
 import { IndexedDBError } from './errors.js'
-import { guardSync, promisifyTransaction } from './helpers.js'
+import { promisifyTransaction, wrapCall } from './helpers.js'
 import { IndexedDBIndex } from './IndexedDBIndex.js'
 import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
 
@@ -27,8 +27,19 @@ import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
  * the transaction on a write. The keyed verbs batch by their array overload — and
  * those overloads are declared first, because an array is itself both a record and
  * a compound `IDBValidKey`, so the array signature must take precedence to read as
- * a batch (AGENTS §9.2). Pass `IDBKeyRange.only([…])` to `records` / `count` to act on a
- * single compound key.
+ * a batch (`.claude/rules/patterns.md` § Managers § Batch operations). Pass
+ * `IDBKeyRange.only([…])` to `records` / `count` to act on a single compound key.
+ *
+ * @example
+ * ```ts
+ * import { IndexedDBStore } from '@orkestrel/indexeddb'
+ *
+ * // `connect` is any thunk resolving to a live `IDBDatabase`; `database` here is
+ * // one a consumer already holds.
+ * const users = new IndexedDBStore('users', { path: 'id' }, () => Promise.resolve(database))
+ * await users.set({ id: 'u1', name: 'Ada' })
+ * await users.get('u1') // { id: 'u1', name: 'Ada' }
+ * ```
  */
 export class IndexedDBStore implements IndexedDBStoreInterface {
 	readonly #name: string
@@ -155,22 +166,24 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 			throw new IndexedDBError(
 				'NOT_FOUND',
 				`Index '${name}' is not declared on store '${this.#name}'`,
+				undefined,
+				{ store: this.#name, index: name },
 			)
 		}
 		return new IndexedDBIndex(this.#name, name, definition, this.#connect)
 	}
 
-	async cursor(options?: CursorOptions): Promise<IndexedDBCursorInterface | null> {
+	async cursor(options?: IndexedDBCursorOptions): Promise<IndexedDBCursorInterface | null> {
 		const engine = await this.#engine('readwrite')
 		return engine.cursor(options)
 	}
 
 	// Open this object store in a fresh transaction of the given mode, bound to the
-	// shared transaction-store engine every verb above delegates to.
+	// shared transaction-store engine every public verb delegates to.
 	async #engine(mode: IDBTransactionMode): Promise<IndexedDBTransactionStore> {
 		const database = await this.#connect()
 		return new IndexedDBTransactionStore(
-			guardSync(() => database.transaction([this.#name], mode).objectStore(this.#name)),
+			wrapCall(() => database.transaction([this.#name], mode).objectStore(this.#name)),
 		)
 	}
 }

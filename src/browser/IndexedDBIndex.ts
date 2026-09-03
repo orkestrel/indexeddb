@@ -1,14 +1,14 @@
-import { isArray } from '@orkestrel/contract'
 import type {
-	CursorOptions,
 	IndexDefinition,
 	IndexedDBCursorInterface,
+	IndexedDBCursorOptions,
 	IndexedDBIndexInterface,
 	KeyPath,
 	Row,
 } from './types.js'
+import { isArray } from '@orkestrel/contract'
 import { IndexedDBError } from './errors.js'
-import { guardSync, hasKey, promisifyRequest, readRecord, readRecords } from './helpers.js'
+import { hasKey, promisifyRequest, readRecord, readRecords, wrapCall } from './helpers.js'
 import { IndexedDBCursor } from './IndexedDBCursor.js'
 
 /**
@@ -20,7 +20,19 @@ import { IndexedDBCursor } from './IndexedDBCursor.js'
  * (`resolve` throws `NOT_FOUND`); `records` reads the matching records and `keys`
  * their **primary** keys; `primary` maps an index key to one primary key; `count`
  * / `has` test presence; `cursor` streams matches. Reads batch by their array
- * overload (AGENTS §9.2).
+ * overload (`.claude/rules/patterns.md` § Managers § Batch operations).
+ *
+ * @example
+ * ```ts
+ * import { IndexedDBIndex } from '@orkestrel/indexeddb'
+ *
+ * // The store name, the index name, its definition, and a thunk resolving to a
+ * // live `IDBDatabase` — the four values `store.index(name)` supplies internally.
+ * const definition = { name: 'byAge', path: 'age' }
+ * const connect = () => Promise.resolve(database)
+ * const byAge = new IndexedDBIndex('users', 'byAge', definition, connect)
+ * await byAge.records(IDBKeyRange.bound(18, 65)) // working-age rows, index-backed
+ * ```
  */
 export class IndexedDBIndex implements IndexedDBIndexInterface {
 	readonly #store: string
@@ -85,12 +97,12 @@ export class IndexedDBIndex implements IndexedDBIndexInterface {
 
 	async keys(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly IDBValidKey[]> {
 		const index = await this.#index()
-		return promisifyRequest(guardSync(() => index.getAllKeys(query, count)))
+		return promisifyRequest(wrapCall(() => index.getAllKeys(query, count)))
 	}
 
 	async primary(key: IDBValidKey): Promise<IDBValidKey | undefined> {
 		const index = await this.#index()
-		return promisifyRequest(guardSync(() => index.getKey(key)))
+		return promisifyRequest(wrapCall(() => index.getKey(key)))
 	}
 
 	has(keys: readonly IDBValidKey[]): Promise<readonly boolean[]>
@@ -107,12 +119,12 @@ export class IndexedDBIndex implements IndexedDBIndexInterface {
 
 	async count(query?: IDBKeyRange | IDBValidKey): Promise<number> {
 		const index = await this.#index()
-		return promisifyRequest(guardSync(() => index.count(query)))
+		return promisifyRequest(wrapCall(() => index.count(query)))
 	}
 
-	async cursor(options?: CursorOptions): Promise<IndexedDBCursorInterface | null> {
+	async cursor(options?: IndexedDBCursorOptions): Promise<IndexedDBCursorInterface | null> {
 		const index = await this.#index()
-		const request = guardSync(() => index.openCursor(options?.query, options?.direction ?? 'next'))
+		const request = wrapCall(() => index.openCursor(options?.query, options?.direction ?? 'next'))
 		const cursor = await promisifyRequest(request)
 		return cursor ? new IndexedDBCursor(cursor, request) : null
 	}
@@ -120,7 +132,7 @@ export class IndexedDBIndex implements IndexedDBIndexInterface {
 	// Open this index in a fresh readonly transaction.
 	async #index(): Promise<IDBIndex> {
 		const database = await this.#connect()
-		return guardSync(() =>
+		return wrapCall(() =>
 			database.transaction([this.#store], 'readonly').objectStore(this.#store).index(this.#name),
 		)
 	}
@@ -131,6 +143,8 @@ export class IndexedDBIndex implements IndexedDBIndexInterface {
 			throw new IndexedDBError(
 				'NOT_FOUND',
 				`No record in index '${this.#name}' of store '${this.#store}' for key ${String(key)}`,
+				undefined,
+				{ store: this.#store, index: this.#name, key },
 			)
 		}
 		return value

@@ -16,7 +16,8 @@ const teardown = createTeardown()
 afterEach(teardown.destroy)
 
 // The `users` seed (non-unique `byAge` + unique `byEmail`, ages 20/30/40) lives in
-// `setupBrowser.ts` (§16.1); each call adds its cleanup to this file's
+// `setupBrowser.ts` (`.claude/rules/tests.md` § Shared test infrastructure);
+// each call adds its cleanup to this file's
 // `teardown` list.
 const seed = (): ReturnType<typeof seedUsers> => seedUsers(teardown)
 

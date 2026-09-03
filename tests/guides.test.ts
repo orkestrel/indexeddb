@@ -43,6 +43,9 @@ const INTERNAL: readonly string[] = Object.freeze([])
 /** Root-level files this package's guides link to. `readInventory` walks directories only. */
 const ROOT_FILES = Object.freeze(['AGENTS.md'])
 
+/** The package guide whose flagship fences the executed transcriptions copy. */
+const PACKAGE_GUIDE = 'guides/indexeddb.md'
+
 const root = new URL('../', import.meta.url)
 const files: Record<string, string> = {
 	...readInventory(root, ['src', 'guides', 'tests'], { extensions: ['.ts', '.md'] }),
@@ -171,3 +174,123 @@ for (const entry of manifest) {
 		})
 	})
 }
+
+// The presence guards for the executed transcriptions in
+// `tests/src/browser/integration.test.ts`, and for the one behavioural sentence this guide states
+// outside any fence, which `tests/src/browser/IndexedDBCursor.test.ts` executes. Every check
+// earlier in this file reads a name, and a name that resolves proves nothing about the sentence
+// beside it, so the behaviour each flagship fence claims is asserted over real Chromium storage
+// there instead. These cases prove the lines those proofs copy are still the documented ones —
+// and nothing whatever about behaviour.
+// Binding a fence's construction line alone would leave its comments free to claim the opposite
+// value and stay green, so every line carrying a claim is bound. Change a fence, change the
+// transcription beside it and the line bound here.
+describe('flagship fence transcriptions', () => {
+	const guideText = requireValue(files[PACKAGE_GUIDE], `Missing file: ${PACKAGE_GUIDE}`)
+
+	it('carries the Surface fence lines the transcription copies', () => {
+		expect(guideText).toContain("await users.set({ id: 'u1', name: 'Ada', age: 36 })")
+		expect(guideText).toContain(']) // array in → array of keys out (array-first batch)')
+		expect(guideText).toContain(
+			"await users.get('u1') // point read by primary key → the row, or undefined",
+		)
+		expect(guideText).toContain(
+			"await users.index('byAge').records(rangeFromKey(18)) // adults, index-backed (O(log n))",
+		)
+	})
+
+	it('carries the key-range fence lines the transcription copies', () => {
+		expect(guideText).toContain(
+			"await users.records(IDBKeyRange.only('user:1')) // exactly one primary key",
+		)
+		expect(guideText).toContain(
+			"await users.records(rangeAboveKey('user:1')) // keys greater than user:1",
+		)
+		expect(guideText).toContain(
+			"await users.records(rangeBelowKey('user:9')) // keys less than user:9",
+		)
+		expect(guideText).toContain(
+			"await users.records(rangeToKey('user:9')) // keys less than or equal to user:9",
+		)
+		expect(guideText).toContain(
+			"await users.index('byAge').records(IDBKeyRange.bound(18, 65)) // working-age, O(log n)",
+		)
+		expect(guideText).toContain(
+			"await users.index('byAge').count(rangeFromKey(18)) // how many adults",
+		)
+		expect(guideText).toContain(
+			"await users.index('byEmail').get('ada@x.io') // unique-index point lookup",
+		)
+		expect(guideText).toContain(
+			"await users.records(rangePrefix('user:')) // primary-key prefix scan",
+		)
+	})
+
+	it('carries the cursor-streaming fence lines the transcription copies', () => {
+		expect(guideText).toContain('if (cursor.value?.active === false) await cursor.remove()')
+		expect(guideText).toContain('cursor = await cursor.continue()')
+	})
+
+	it('carries the index-cursor seek fence lines the transcription copies', () => {
+		expect(guideText).toContain("if (cursor) cursor = await cursor.seek(30, 'c')")
+		expect(guideText).toContain("cursor?.primary // 'c'")
+	})
+
+	it('carries the store-cursor seek sentence the cursor suite executes', () => {
+		expect(guideText).toContain(
+			'a store cursor from `db.store(name).cursor()` throws `InvalidAccessError`',
+		)
+		expect(guideText).toContain('reaches the caller as an `IndexedDBError` of code `UNKNOWN`')
+	})
+
+	it('carries the explicit-transaction fence lines the transcription copies', () => {
+		expect(guideText).toContain(
+			'if (cursor) cursor = await cursor.advance(1) // skip forward one record',
+		)
+		expect(guideText).toContain(
+			'if (cursor?.value) await cursor.update({ ...cursor.value, seen: true })',
+		)
+		expect(guideText).toContain(
+			'transaction.commit() // flush early instead of waiting for the scope to resolve',
+		)
+	})
+
+	it('carries the request-boundary fence lines the transcription copies', () => {
+		expect(guideText).toContain(
+			"await promisifyRequest(wrapCall(() => native.get('u1'))) // sync throw → IndexedDBError too",
+		)
+		expect(guideText).toContain(
+			"await readRecord(native, 'u1') // narrowed to Row (or undefined) with isRecord",
+		)
+		expect(guideText).toContain('await readRecords(native) // every record, narrowed the same way')
+		expect(guideText).toContain("await hasKey(native, 'u1') // a native count() > 0")
+		expect(guideText).toContain(
+			'await promisifyTransaction(native.transaction) // resolves after the transaction commits',
+		)
+		expect(guideText).toContain(
+			'wrapError(null) // the same DOMException → IndexedDBError mapping every bridge uses',
+		)
+	})
+
+	it('carries the typed-fault fence lines the transcription copies', () => {
+		expect(guideText).toContain("await db.store('users').add({ id: 'u1', name: 'Ada' })")
+		expect(guideText).toContain(
+			"if (error instanceof IndexedDBError && error.code === 'CONSTRAINT') {",
+		)
+		expect(guideText).toContain("await db.store('users').set({ id: 'u1', name: 'Ada' })")
+	})
+
+	it('carries the isIndexedDBError fence lines the transcription copies', () => {
+		expect(guideText).toContain("await db.store('users').resolve('ghost')")
+		expect(guideText).toContain("if (isIndexedDBError(error) && error.code === 'NOT_FOUND') {")
+	})
+
+	it('carries the upgrade fence lines the transcription copies', () => {
+		expect(guideText).toContain("context.stores.drop('legacy')")
+		expect(guideText).toContain("context.stores.create('meta', { path: 'key' })")
+		expect(guideText).toContain("context.indexes.create('users', { name: 'byName', path: 'name' })")
+		expect(guideText).toContain("context.indexes.drop('users', 'byRetired')")
+		expect(guideText).toContain("const store = context.stores.store('users')")
+		expect(guideText).toContain('await store.set({ ...row, migrated: true })')
+	})
+})

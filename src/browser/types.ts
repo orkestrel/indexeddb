@@ -3,7 +3,8 @@
 // There is no cross-environment database layer in this package — no query /
 // filter / sort / aggregate builder here, only what raw IndexedDB offers
 // natively: object stores, secondary indexes, native key ranges, cursors, and
-// native multi-store transactions. Types are the source of truth (AGENTS §2).
+// native multi-store transactions. Types are the source of truth
+// (`AGENTS.md` § TTTDD).
 //
 // Values are this package's own `Row` (a record), narrowed from IndexedDB's
 // structured clone with `isRecord` at the read boundary — an `as`-free bridge.
@@ -43,7 +44,8 @@ export type Row = Record<string, unknown>
  * `InvalidStateError` — a defensive mapping for a deleted store/index or
  * similarly invalid native handle; not cleanly reachable through this
  * wrapper's public API, which always opens a fresh transaction or routes
- * through the auto-commit-guarded transaction store above), and `UNKNOWN` (any
+ * through the auto-commit-guarded {@link IndexedDBTransactionStoreInterface}),
+ * and `UNKNOWN` (any
  * unmapped fault).
  */
 export type IndexedDBErrorCode =
@@ -102,8 +104,8 @@ export interface StoreDefinition {
 	readonly indexes?: readonly IndexDefinition[]
 }
 
-/** Represents a database's stores — a map of store name to its {@link StoreDefinition}. */
-export type StoresShape = Readonly<Record<string, StoreDefinition>>
+/** Represents a database's schema — a map of store name to its {@link StoreDefinition}. */
+export type IndexedDBSchema = Readonly<Record<string, StoreDefinition>>
 
 /**
  * Represents the store manager of a version-change upgrade.
@@ -112,7 +114,7 @@ export type StoresShape = Readonly<Record<string, StoreDefinition>>
  * Reached as `context.stores` on {@link IndexedDBUpgradeContext}. `names` lists
  * the stores the database holds at that moment, so it already reflects any store
  * the built-in create-missing pass just created. `create` / `drop` add or remove
- * a whole store; `open` reaches a transaction-bound store for data migration.
+ * a whole store; `store` reaches a transaction-bound store for data migration.
  * Versionchange-only: every call must stay within the upgrade transaction — no
  * non-IDB `await`, or it auto-commits and the upgrade fails.
  *
@@ -121,7 +123,7 @@ export type StoresShape = Readonly<Record<string, StoreDefinition>>
  * upgrade: async (context) => {
  * 	context.stores.create('meta', { path: 'key' })
  * 	context.stores.drop('legacy')
- * 	await context.stores.open('users').set({ id: 'u1', migrated: true })
+ * 	await context.stores.store('users').set({ id: 'u1', migrated: true })
  * }
  * ```
  */
@@ -129,7 +131,7 @@ export interface IndexedDBUpgradeStoreManagerInterface {
 	readonly names: readonly string[]
 	create(name: string, definition: StoreDefinition): void
 	drop(name: string): void
-	open(name: string): IndexedDBTransactionStoreInterface
+	store(name: string): IndexedDBTransactionStoreInterface
 }
 
 /**
@@ -191,8 +193,8 @@ export interface IndexedDBUpgradeContext {
  * same versionchange transaction — use it to drop a store with
  * `context.stores.drop`, add or remove an index on any store with
  * `context.indexes.create` / `context.indexes.drop`, or migrate data with
- * `context.stores.open(name)`. It may return `void` or a `Promise<void>` — an async
- * `upgrade` may `await` the IDB requests it issues through `context.stores.open(...)`
+ * `context.stores.store(name)`. It may return `void` or a `Promise<void>` — an async
+ * `upgrade` may `await` the IDB requests it issues through `context.stores.store(...)`
  * (see the auto-commit rule on {@link IndexedDBUpgradeContext}). The built-in
  * pass and custom callback share one failure boundary: a synchronous failure in
  * either phase, or a custom rejection captured while the versionchange
@@ -206,7 +208,7 @@ export interface IndexedDBUpgradeContext {
  * committed schema cannot then be rolled back. A rejection that arrives only
  * after the open request already succeeded cannot be recovered retroactively.
  */
-export interface IndexedDBDatabaseOptions<Stores extends StoresShape = StoresShape> {
+export interface IndexedDBDatabaseOptions<Stores extends IndexedDBSchema = IndexedDBSchema> {
 	readonly name: string
 	readonly version?: number
 	readonly stores: Stores
@@ -221,7 +223,7 @@ export interface IndexedDBDatabaseOptions<Stores extends StoresShape = StoresSha
  * iterates every record; `direction` sets the traversal order (`next` / `prev` /
  * their `unique` variants).
  */
-export interface CursorOptions {
+export interface IndexedDBCursorOptions {
 	readonly query?: IDBKeyRange | IDBValidKey
 	readonly direction?: IDBCursorDirection
 }
@@ -237,10 +239,13 @@ export interface CursorOptions {
  * eagerly). `value` is the record at that position narrowed with `isRecord`, and
  * `undefined` when the stored value is not a record — the same absence
  * `readRecord` reports for that boundary. `continue` / `seek` / `advance` resolve
- * to the next cursor or `null` at the end; `update` / `delete` mutate the record
- * at the current position. The owning transaction stays alive only while you
- * drive the cursor promptly — do no unrelated `await` between steps, or it
- * auto-commits.
+ * to the next cursor or `null` at the end, and `seek` is valid only on a cursor
+ * whose `source` is an index — on a store cursor it throws; `update` / `remove`
+ * mutate the record at the current position. Every move returns the cursor at the
+ * new position and leaves this one on its own snapshot, so rebind at each step
+ * rather than reusing the wrapper you moved from. The owning transaction stays
+ * alive only while you drive the cursor promptly — do no unrelated `await`
+ * between steps, or it auto-commits.
  */
 export interface IndexedDBCursorInterface {
 	readonly cursor: IDBCursorWithValue
@@ -250,10 +255,24 @@ export interface IndexedDBCursorInterface {
 	readonly value: Row | undefined
 	readonly direction: IDBCursorDirection
 	continue(key?: IDBValidKey): Promise<IndexedDBCursorInterface | null>
+	/**
+	 * Advances to a given index key and primary key.
+	 *
+	 * @remarks
+	 * Valid only on a cursor whose `source` is an index. It drives the native
+	 * `continuePrimaryKey`, which IndexedDB defines for an index cursor alone.
+	 *
+	 * @param key - The index key to advance to
+	 * @param primary - The primary key to land on within that index key
+	 * @returns The cursor at the new position, or `null` past the end
+	 * @throws An {@link IndexedDBError} of code `UNKNOWN` when the cursor's source
+	 *   is an object store: the native call raises `InvalidAccessError`, a name
+	 *   `ERROR_CODES` does not map
+	 */
 	seek(key: IDBValidKey, primary: IDBValidKey): Promise<IndexedDBCursorInterface | null>
 	advance(count: number): Promise<IndexedDBCursorInterface | null>
 	update(value: Row): Promise<IDBValidKey>
-	delete(): Promise<void>
+	remove(): Promise<void>
 }
 
 // === Index
@@ -267,7 +286,7 @@ export interface IndexedDBCursorInterface {
  * `keys` read many (the matching records, and their **primary** keys); `primary`
  * maps an index key to one primary key; `count` / `has` test presence; `cursor`
  * streams matches. A read of several keys is the array overload of the same verb
- * (AGENTS §9.2).
+ * (`.claude/rules/patterns.md` § Managers § Batch operations).
  */
 export interface IndexedDBIndexInterface {
 	readonly name: string
@@ -284,7 +303,7 @@ export interface IndexedDBIndexInterface {
 	has(keys: readonly IDBValidKey[]): Promise<readonly boolean[]>
 	has(key: IDBValidKey): Promise<boolean>
 	count(query?: IDBKeyRange | IDBValidKey): Promise<number>
-	cursor(options?: CursorOptions): Promise<IndexedDBCursorInterface | null>
+	cursor(options?: IndexedDBCursorOptions): Promise<IndexedDBCursorInterface | null>
 }
 
 // === Record store
@@ -302,7 +321,8 @@ export interface IndexedDBIndexInterface {
  * on a duplicate); `remove` deletes; `clear` empties the store; `cursor` streams.
  * The keyed verbs batch by their array overload — listed first, because an array is
  * itself a valid record and a compound `IDBValidKey`, so the array signature must
- * win (AGENTS §9.2). To act on a single **compound** key, pass
+ * win (`.claude/rules/patterns.md` § Managers § Batch operations). To act on a
+ * single **compound** key, pass
  * `IDBKeyRange.only([…])` to `records` / `count`.
  */
 export interface IndexedDBRecordStoreInterface {
@@ -322,7 +342,7 @@ export interface IndexedDBRecordStoreInterface {
 	remove(keys: readonly IDBValidKey[]): Promise<void>
 	remove(key: IDBValidKey): Promise<void>
 	clear(): Promise<void>
-	cursor(options?: CursorOptions): Promise<IndexedDBCursorInterface | null>
+	cursor(options?: IndexedDBCursorOptions): Promise<IndexedDBCursorInterface | null>
 }
 
 // === Store
@@ -375,7 +395,7 @@ export interface IndexedDBTransactionStoreInterface extends IndexedDBRecordStore
  * independent ones: `active` is true while the transaction still accepts
  * operations, and `finished` is true after commit or abort.
  */
-export interface IndexedDBTransactionInterface<Stores extends StoresShape = StoresShape> {
+export interface IndexedDBTransactionInterface<Stores extends IndexedDBSchema = IndexedDBSchema> {
 	readonly transaction: IDBTransaction
 	readonly mode: IDBTransactionMode
 	readonly stores: readonly string[]
@@ -397,14 +417,14 @@ export interface IndexedDBTransactionInterface<Stores extends StoresShape = Stor
  * use (`connect`, also awaited by every store operation); `store` reaches a typed
  * store; `read` / `write` run an atomic scope over one or more stores; `close`
  * releases the connection and `drop` deletes the database. `stores` lists the
- * declared (or, once open, the live) store names; `open` reports whether a live
+ * declared (or, after it opens, the live) store names; `open` reports whether a live
  * connection is held. Native blocked notifications are progress rather than
  * terminal faults: `connect` / `drop` stay pending until the blocking connection
  * closes and the native request succeeds or errors. `close` permanently retires
  * the handle; if an in-flight open later succeeds, its result is closed and that
  * pending `connect` rejects with `CLOSED`.
  */
-export interface IndexedDBDatabaseInterface<Stores extends StoresShape = StoresShape> {
+export interface IndexedDBDatabaseInterface<Stores extends IndexedDBSchema = IndexedDBSchema> {
 	readonly database: IDBDatabase
 	readonly name: string
 	readonly version: number

@@ -1,4 +1,8 @@
-import type { IndexedDBDatabaseInterface, IndexedDBDatabaseOptions, StoresShape } from './types.js'
+import type {
+	IndexedDBDatabaseInterface,
+	IndexedDBDatabaseOptions,
+	IndexedDBSchema,
+} from './types.js'
 import { IndexedDBDatabase } from './IndexedDBDatabase.js'
 
 /**
@@ -29,7 +33,7 @@ import { IndexedDBDatabase } from './IndexedDBDatabase.js'
  * await db.store('users').index('byAge').records(rangeFromKey(18)) // adults, index-backed
  * ```
  */
-export function createIndexedDBDatabase<const Stores extends StoresShape>(
+export function createIndexedDBDatabase<const Stores extends IndexedDBSchema>(
 	options: IndexedDBDatabaseOptions<Stores>,
 ): IndexedDBDatabaseInterface<Stores> {
 	return new IndexedDBDatabase(options)

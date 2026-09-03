@@ -23,21 +23,21 @@ describe('IndexedDBTransaction — metadata', () => {
 			posts: { path: 'id' },
 		})
 		teardown.add(cleanup)
-		await db.read(['users', 'posts'], (tx) => {
-			expect(tx.transaction).toBeInstanceOf(IDBTransaction)
-			expect(tx.mode).toBe('readonly')
-			expect([...tx.stores].sort()).toEqual(['posts', 'users'])
-			expect(tx.active).toBe(true)
-			expect(tx.finished).toBe(false)
-			expect(tx.error).toBeNull()
+		await db.read(['users', 'posts'], (transaction) => {
+			expect(transaction.transaction).toBeInstanceOf(IDBTransaction)
+			expect(transaction.mode).toBe('readonly')
+			expect([...transaction.stores].sort()).toEqual(['posts', 'users'])
+			expect(transaction.active).toBe(true)
+			expect(transaction.finished).toBe(false)
+			expect(transaction.error).toBeNull()
 		})
 	})
 
 	it('a write scope reports the readwrite mode', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
-		await db.write('users', (tx) => {
-			expect(tx.mode).toBe('readwrite')
+		await db.write('users', (transaction) => {
+			expect(transaction.mode).toBe('readwrite')
 		})
 	})
 })
@@ -49,9 +49,9 @@ describe('IndexedDBTransaction — scoped store access', () => {
 			posts: { path: 'id' },
 		})
 		teardown.add(cleanup)
-		await db.read('users', (tx) => {
-			expect(tx.store('users').store).toBeInstanceOf(IDBObjectStore)
-			const caught = captureError(() => tx.store('posts')) // not in this transaction's scope
+		await db.read('users', (transaction) => {
+			expect(transaction.store('users').store).toBeInstanceOf(IDBObjectStore)
+			const caught = captureError(() => transaction.store('posts')) // not in this transaction's scope
 			expect(caught).toBeInstanceOf(IndexedDBError)
 			expect(errorCode(caught)).toBe('NOT_FOUND')
 		})
@@ -65,10 +65,10 @@ describe('IndexedDBTransaction — scoped store access', () => {
 		// asserted unconditionally afterwards (no conditional expect).
 		let caught: unknown
 		await db
-			.write('users', (tx) => {
-				tx.abort()
+			.write('users', (transaction) => {
+				transaction.abort()
 				try {
-					tx.store('users') // no longer active
+					transaction.store('users') // no longer active
 				} catch (error) {
 					caught = error
 				}
@@ -90,13 +90,13 @@ describe('IndexedDBTransaction — abort', () => {
 		let activeAfterAbort = true
 		let finishedAfterAbort = false
 		await db
-			.write('users', async (tx) => {
-				captured = tx
-				await tx.store('users').set({ id: 'u1', n: 2 })
-				await tx.store('users').set({ id: 'u2', n: 9 })
-				tx.abort()
-				activeAfterAbort = tx.active
-				finishedAfterAbort = tx.finished
+			.write('users', async (transaction) => {
+				captured = transaction
+				await transaction.store('users').set({ id: 'u1', n: 2 })
+				await transaction.store('users').set({ id: 'u2', n: 9 })
+				transaction.abort()
+				activeAfterAbort = transaction.active
+				finishedAfterAbort = transaction.finished
 			})
 			.catch(() => {})
 		// `abort` flips the state synchronously, and it survives on the reference.
@@ -113,10 +113,10 @@ describe('IndexedDBTransaction — abort', () => {
 		teardown.add(cleanup)
 		let caught: unknown
 		await db
-			.write('users', (tx) => {
-				tx.abort()
+			.write('users', (transaction) => {
+				transaction.abort()
 				try {
-					tx.abort() // already finished
+					transaction.abort() // already finished
 				} catch (error) {
 					caught = error
 				}
@@ -131,11 +131,37 @@ describe('IndexedDBTransaction — commit', () => {
 	it('flushes the scope early and persists its writes', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
-		await db.write('users', async (tx) => {
-			await tx.store('users').set({ id: 'u1', name: 'Ada' })
-			tx.commit()
+		await db.write('users', async (transaction) => {
+			await transaction.store('users').set({ id: 'u1', name: 'Ada' })
+			transaction.commit()
 		})
 		expect(await db.store('users').get('u1')).toEqual({ id: 'u1', name: 'Ada' })
+	})
+
+	it('settles the transaction, so a second commit throws INACTIVE', async () => {
+		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
+		teardown.add(cleanup)
+		// `commit` is one of the two terminating transitions, so it writes the same
+		// settled fact `abort` writes. Read the state synchronously after the call,
+		// before the native `complete` event has had a turn to settle it instead.
+		let activeAfterCommit = true
+		let finishedAfterCommit = false
+		let caught: unknown
+		await db.write('users', async (transaction) => {
+			await transaction.store('users').set({ id: 'u1', name: 'Ada' })
+			transaction.commit()
+			activeAfterCommit = transaction.active
+			finishedAfterCommit = transaction.finished
+			try {
+				transaction.commit() // already finished
+			} catch (error) {
+				caught = error
+			}
+		})
+		expect(finishedAfterCommit).toBe(true)
+		expect(activeAfterCommit).toBe(false)
+		expect(caught).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(caught)).toBe('INACTIVE')
 	})
 
 	it('throws INACTIVE when committing an already-finished transaction', async () => {
@@ -143,10 +169,10 @@ describe('IndexedDBTransaction — commit', () => {
 		teardown.add(cleanup)
 		let caught: unknown
 		await db
-			.write('users', (tx) => {
-				tx.abort()
+			.write('users', (transaction) => {
+				transaction.abort()
 				try {
-					tx.commit() // already finished
+					transaction.commit() // already finished
 				} catch (error) {
 					caught = error
 				}

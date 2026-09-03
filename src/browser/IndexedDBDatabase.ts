@@ -1,16 +1,16 @@
-import { isArray } from '@orkestrel/contract'
 import type {
 	IndexedDBDatabaseInterface,
 	IndexedDBDatabaseOptions,
+	IndexedDBSchema,
 	IndexedDBStoreInterface,
 	IndexedDBTransactionInterface,
 	IndexedDBUpgradeContext,
 	IndexDefinition,
 	StoreDefinition,
-	StoresShape,
 } from './types.js'
+import { isArray } from '@orkestrel/contract'
 import { IndexedDBError } from './errors.js'
-import { createIndex, guardSync, promisifyTransaction } from './helpers.js'
+import { createIndex, promisifyTransaction, wrapCall } from './helpers.js'
 import { IndexedDBStore } from './IndexedDBStore.js'
 import { IndexedDBTransaction } from './IndexedDBTransaction.js'
 import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
@@ -31,9 +31,22 @@ import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
  * undo the committed schema. Native blocked notifications leave open/delete
  * requests pending, and `close` permanently rejects any in-flight open after
  * closing its eventual native result.
+ *
+ * @example
+ * ```ts
+ * import { createIndexedDBDatabase, IndexedDBDatabase } from '@orkestrel/indexeddb'
+ *
+ * const options = { name: 'app', version: 1, stores: { users: { path: 'id' } } }
+ * const db = new IndexedDBDatabase(options)
+ * // `createIndexedDBDatabase(options)` builds the same handle and, through its
+ * // `const` type parameter, narrows `store(name)` to the declared store names.
+ * const typed = createIndexedDBDatabase(options)
+ * await db.store('users').set({ id: 'u1', name: 'Ada' })
+ * await typed.connect()
+ * ```
  */
 export class IndexedDBDatabase<
-	Stores extends StoresShape = StoresShape,
+	Stores extends IndexedDBSchema = IndexedDBSchema,
 > implements IndexedDBDatabaseInterface<Stores> {
 	readonly #name: string
 	readonly #version: number | undefined
@@ -109,6 +122,8 @@ export class IndexedDBDatabase<
 			throw new IndexedDBError(
 				'NOT_FOUND',
 				`Store '${name}' is not declared on database '${this.#name}'`,
+				undefined,
+				{ database: this.#name, store: name },
 			)
 		}
 		return new IndexedDBStore(name, definition, () => this.connect())
@@ -156,7 +171,7 @@ export class IndexedDBDatabase<
 	): Promise<void> {
 		const database = await this.connect()
 		const names = isArray<string>(stores) ? [...stores] : [stores]
-		const native = guardSync(() => database.transaction(names, mode))
+		const native = wrapCall(() => database.transaction(names, mode))
 		const wrapper = new IndexedDBTransaction<Stores>(native)
 		// Attach the completion listeners BEFORE invoking `scope` — a scope that
 		// ends on a trailing non-IDB `await` lets the transaction auto-commit, and
@@ -174,10 +189,10 @@ export class IndexedDBDatabase<
 					// Already settled by the native transaction — nothing to roll back.
 				}
 			}
-			// `settled` may still reject (the abort above, or the native transaction
-			// having already aborted/errored) after `scope` already threw — that
-			// rejection is redundant with `error` below and must not surface as an
-			// unhandled rejection.
+			// `settled` may still reject (the abort this catch just performed, or the
+			// native transaction having already aborted/errored) after `scope` already
+			// threw — that rejection is redundant with the `error` this catch rethrows
+			// and must not surface as an unhandled rejection.
 			settled.catch(() => {})
 			throw error
 		}
@@ -198,7 +213,7 @@ export class IndexedDBDatabase<
 		}
 		// An abnormal, browser-initiated close (a crashed extension, storage
 		// eviction) fires this event — clear BOTH latches, mirroring
-		// `onversionchange` below, so a later operation lazily reconnects instead
+		// the `onversionchange` handler, so a later operation lazily reconnects instead
 		// of finding a stale resolved `#opening` for a connection that is now dead.
 		database.onclose = this.#clearConnection.bind(this, database)
 		// Yield to another context's version-change upgrade instead of blocking it
@@ -274,7 +289,7 @@ export class IndexedDBDatabase<
 						transaction.abort()
 					} catch {
 						// Custom code may already have aborted the transaction before
-						// throwing; the initiating failure above remains authoritative.
+						// throwing; the failure recorded first remains authoritative.
 					}
 				}
 			})
@@ -322,7 +337,7 @@ export class IndexedDBDatabase<
 				names: Array.from(database.objectStoreNames),
 				create: this.#createUpgradeStore.bind(this, database),
 				drop: this.#dropUpgradeStore.bind(this, database),
-				open: this.#openUpgradeStore.bind(this, transaction),
+				store: this.#upgradeStore.bind(this, transaction),
 			},
 			indexes: {
 				create: this.#createUpgradeIndex.bind(this, transaction),
@@ -343,15 +358,15 @@ export class IndexedDBDatabase<
 	}
 
 	#createUpgradeStore(database: IDBDatabase, name: string, definition: StoreDefinition): void {
-		guardSync(() => this.#createStore(database, name, definition))
+		wrapCall(() => this.#createStore(database, name, definition))
 	}
 
 	#dropUpgradeStore(database: IDBDatabase, name: string): void {
-		guardSync(() => database.deleteObjectStore(name))
+		wrapCall(() => database.deleteObjectStore(name))
 	}
 
-	#openUpgradeStore(transaction: IDBTransaction, name: string): IndexedDBTransactionStore {
-		return new IndexedDBTransactionStore(guardSync(() => transaction.objectStore(name)))
+	#upgradeStore(transaction: IDBTransaction, name: string): IndexedDBTransactionStore {
+		return new IndexedDBTransactionStore(wrapCall(() => transaction.objectStore(name)))
 	}
 
 	#createUpgradeIndex(
@@ -359,11 +374,11 @@ export class IndexedDBDatabase<
 		store: string,
 		definition: IndexDefinition,
 	): void {
-		guardSync(() => createIndex(transaction.objectStore(store), definition))
+		wrapCall(() => createIndex(transaction.objectStore(store), definition))
 	}
 
 	#dropUpgradeIndex(transaction: IDBTransaction, store: string, name: string): void {
-		guardSync(() => transaction.objectStore(store).deleteIndex(name))
+		wrapCall(() => transaction.objectStore(store).deleteIndex(name))
 	}
 
 	#createStore(database: IDBDatabase, name: string, definition: StoreDefinition): void {
