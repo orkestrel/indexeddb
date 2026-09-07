@@ -13,11 +13,11 @@ import type { IndexedDBErrorCode } from './types.js'
  * `code` and an optional `context` beside the native cause.
  *
  * @remarks
- * Carries an {@link IndexedDBErrorCode} and the originating native error as the
- * standard `cause`. Construct it directly for wrapper-lifecycle faults; the
- * internal `wrapError` maps a native `DOMException` to the right code at the
- * request boundary. Narrow a caught value with {@link isIndexedDBError}, this
- * package's own guard.
+ * The `code` is an {@link IndexedDBErrorCode}, and the originating native error
+ * rides as the standard `cause`. Construct it directly for wrapper-lifecycle
+ * faults; the internal `wrapError` maps a native `DOMException` to the right code
+ * at the request boundary. Narrow a caught value with {@link isIndexedDBError},
+ * this package's own guard.
  *
  * `context` carries the facts a caller branches on — the database, store, index,
  * key, or transaction scope the fault names — as machine-readable members beside

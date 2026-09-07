@@ -5,7 +5,7 @@
 > indexes, native key ranges, promisified cursors, multi-store transactions, and
 > versioned schema upgrades, over `await` instead of raw `IDBRequest` events.
 
-Its job is to turn IndexedDB's event-driven, callback-shaped, structurally-untyped surface into one you can `await` — and nothing more. It exposes exactly what raw IndexedDB offers natively and deliberately nothing else: there is no `where` / `filter` / `order` / aggregate query builder here; that would duplicate a general-purpose query engine this package does not ship. Source: [`src/browser`](../src/browser). Surfaced through the `@src/browser` barrel (published as `@orkestrel/indexeddb`).
+Its job is to type IndexedDB's event-driven, callback-shaped, structurally-untyped surface. It exposes exactly what raw IndexedDB offers natively and deliberately nothing else: there is no `where` / `filter` / `order` / aggregate query builder here; that would duplicate a general-purpose query engine this package does not ship. Source: [`src/browser`](../src/browser). Surfaced through the `@src/browser` barrel (published as `@orkestrel/indexeddb`).
 
 ## Surface
 
@@ -84,28 +84,30 @@ await users.index('byAge').records(rangeFromKey(18)) // adults, index-backed (O(
 
 ### Types
 
-| API                                     | Kind      | Summary                                                                                                                          |
-| --------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `Row`                                   | type      | Represents a record stored in, and read from, an object store.                                                                   |
-| `KeyPath`                               | type      | Represents a key path — one field, or several for a compound key.                                                                |
-| `IndexDefinition`                       | interface | Represents the declaration of a secondary index — its name, key path, and uniqueness.                                            |
-| `StoreDefinition`                       | interface | Represents the declaration of one object store — its key path, key generation, and secondary indexes.                            |
-| `IndexedDBSchema`                       | type      | Represents a database's schema — a map of store name to its `StoreDefinition`.                                                   |
-| `IndexedDBUpgradeContext`               | interface | Represents the escape hatch into a version-change upgrade, passed to `IndexedDBDatabaseOptions.upgrade`.                         |
-| `IndexedDBUpgradeStoreManagerInterface` | interface | Represents the store manager of a version-change upgrade.                                                                        |
-| `IndexedDBUpgradeIndexManagerInterface` | interface | Represents the secondary-index manager of a version-change upgrade.                                                              |
-| `IndexedDBDatabaseOptions`              | interface | Represents the options for `createIndexedDBDatabase`.                                                                            |
-| `IndexedDBCursorOptions`                | interface | Represents the options for opening a cursor.                                                                                     |
-| `IndexedDBErrorCode`                    | type      | Represents a machine-readable `IndexedDBError` code.                                                                             |
-| `IndexedDBDatabaseInterface`            | interface | Represents the contract of a typed, lazily-connecting IndexedDB database.                                                        |
-| `IndexedDBRecordStoreInterface`         | interface | Represents the contract the object-store surfaces share — the keyed record verbs, in or out of an explicit transaction.          |
-| `IndexedDBStoreInterface`               | interface | Represents the contract of an object store — the keyed record surface plus the store's own schema metadata and `index` accessor. |
-| `IndexedDBIndexInterface`               | interface | Represents the contract of a secondary index — read access by an indexed key path.                                               |
-| `IndexedDBCursorInterface`              | interface | Represents the contract of a promisified value cursor for streaming and in-place mutation.                                       |
-| `IndexedDBTransactionInterface`         | interface | Represents the contract of an explicit transaction over one or more stores.                                                      |
-| `IndexedDBTransactionStoreInterface`    | interface | Represents the contract of an object store bound to an explicit transaction.                                                     |
+A `Shape` cell holds an interface's data members as bare names in braces, `?` marking an optional member and `plus` introducing its call-signature members, and a type alias's own type literal with a union's arms escaped as `\|`.
 
-The data-only shapes carry these members: `IndexDefinition` — `name` / `path` / `unique` / `multiple`; `StoreDefinition` — `path` / `increment` / `indexes`; `IndexedDBDatabaseOptions` — `name` / `version?` / `stores` / `upgrade?`; `IndexedDBCursorOptions` — a `query` key range and a `direction`.
+| API                                     | Kind      | Shape                                                                                                                                                                  | Summary                                                                                                                          |
+| --------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `Row`                                   | type      | `Record<string, unknown>`                                                                                                                                              | Represents a record stored in, and read from, an object store.                                                                   |
+| `KeyPath`                               | type      | `string \| readonly string[]`                                                                                                                                          | Represents a key path — one field, or several for a compound key.                                                                |
+| `IndexDefinition`                       | interface | `{ name, path, unique?, multiple? }`                                                                                                                                   | Represents the declaration of a secondary index — its name, key path, and uniqueness.                                            |
+| `StoreDefinition`                       | interface | `{ path?, increment?, indexes? }`                                                                                                                                      | Represents the declaration of one object store — its key path, key generation, and secondary indexes.                            |
+| `IndexedDBSchema`                       | type      | `Readonly<Record<string, StoreDefinition>>`                                                                                                                            | Represents a database's schema — a map of store name to its `StoreDefinition`.                                                   |
+| `IndexedDBUpgradeContext`               | interface | `{ transaction, old, version, stores, indexes }`                                                                                                                       | Represents the escape hatch into a version-change upgrade, passed to `IndexedDBDatabaseOptions.upgrade`.                         |
+| `IndexedDBUpgradeStoreManagerInterface` | interface | `{ names } plus create, drop, store`                                                                                                                                   | Represents the store manager of a version-change upgrade.                                                                        |
+| `IndexedDBUpgradeIndexManagerInterface` | interface | `{} plus create, drop`                                                                                                                                                 | Represents the secondary-index manager of a version-change upgrade.                                                              |
+| `IndexedDBDatabaseOptions`              | interface | `{ name, version?, stores, upgrade? }`                                                                                                                                 | Represents the options for `createIndexedDBDatabase`.                                                                            |
+| `IndexedDBCursorOptions`                | interface | `{ query?, direction? }`                                                                                                                                               | Represents the options for opening a cursor.                                                                                     |
+| `IndexedDBErrorCode`                    | type      | `'NOT_OPEN' \| 'CLOSED' \| 'NOT_FOUND' \| 'CONSTRAINT' \| 'QUOTA' \| 'ABORTED' \| 'DATA' \| 'OPEN' \| 'UPGRADE' \| 'INACTIVE' \| 'READONLY' \| 'INVALID' \| 'UNKNOWN'` | Represents a machine-readable `IndexedDBError` code.                                                                             |
+| `IndexedDBDatabaseInterface`            | interface | `{ database, name, version, stores, open } plus connect, store, read, write, close, drop`                                                                              | Represents the contract of a typed, lazily-connecting IndexedDB database.                                                        |
+| `IndexedDBRecordStoreInterface`         | interface | `{} plus get, resolve, records, keys, has, count, set, add, remove, clear, cursor`                                                                                     | Represents the contract the object-store surfaces share — the keyed record verbs, in or out of an explicit transaction.          |
+| `IndexedDBStoreInterface`               | interface | `{ name, path, indexes, increment } plus get, resolve, records, keys, has, count, set, add, remove, clear, index, cursor`                                              | Represents the contract of an object store — the keyed record surface plus the store's own schema metadata and `index` accessor. |
+| `IndexedDBIndexInterface`               | interface | `{ name, path, unique, multiple } plus get, resolve, records, keys, primary, has, count, cursor`                                                                       | Represents the contract of a secondary index — read access by an indexed key path.                                               |
+| `IndexedDBCursorInterface`              | interface | `{ cursor, source, key, primary, value, direction } plus continue, seek, advance, update, remove`                                                                      | Represents the contract of a promisified value cursor for streaming and in-place mutation.                                       |
+| `IndexedDBTransactionInterface`         | interface | `{ transaction, mode, stores, active, finished, error } plus store, abort, commit`                                                                                     | Represents the contract of an explicit transaction over one or more stores.                                                      |
+| `IndexedDBTransactionStoreInterface`    | interface | `{ store } plus get, resolve, records, keys, has, count, set, add, remove, clear, cursor`                                                                              | Represents the contract of an object store bound to an explicit transaction.                                                     |
+
+An extending interface's cell lists every member it declares or inherits, so `IndexedDBStoreInterface` and `IndexedDBTransactionStoreInterface` each carry the `IndexedDBRecordStoreInterface` verbs.
 
 Values are this package's own `Row` (a record), narrowed from IndexedDB's structured clone with `isRecord` (from `@orkestrel/contract`) at the read boundary — an `as`-free bridge. Keys are the full native `IDBValidKey`, so the wrapper speaks IndexedDB's whole key space.
 
@@ -113,13 +115,11 @@ A database connects **lazily**: the first store operation (or an explicit `conne
 
 ## Methods
 
-The public methods of each behavioral interface — one table per type, keyed by its backticked name, every call-signature member listed. Each interface's `readonly` data members are named in the paragraph under its own heading in this section. Each class implements its interface exactly, so this doubles as the per-instance method surface (`AGENTS.md` § Documentation contract).
+The public methods of each behavioral interface — one table per type, keyed by its backticked name, every call-signature member listed. Each interface's `readonly` data members are named in the `Shape` column of the [Types](#types) table, earlier. Each class implements its interface exactly, so this doubles as the per-instance method surface (`AGENTS.md` § Documentation contract).
 
-`IndexedDBUpgradeContext` carries only readonly data — `transaction` / `old` / `version` / `stores` / `indexes` — so no Methods table follows for it. Its managers carry the upgrade's schema verbs: `context.stores` is the store manager, while `IndexedDBDatabaseInterface.stores` is the plain name list.
+`IndexedDBUpgradeContext` carries only readonly data, so no Methods table follows for it. Its managers carry the upgrade's schema verbs: `context.stores` is the store manager, while `IndexedDBDatabaseInterface.stores` is the plain name list.
 
 #### `IndexedDBDatabaseInterface`
-
-Its readonly data members are `database`, `name`, `version`, `stores`, and `open`.
 
 | Method    | Returns                   | Summary                                                                              |
 | --------- | ------------------------- | ------------------------------------------------------------------------------------ |
@@ -132,7 +132,7 @@ Its readonly data members are `database`, `name`, `version`, `stores`, and `open
 
 #### `IndexedDBRecordStoreInterface`
 
-The keyed record surface `IndexedDBStoreInterface` and `IndexedDBTransactionStoreInterface` both extend, declared once so neither can drift from the other. The keyed verbs batch by their array overload (one in → one out; array in → array out), array-first (`.claude/rules/patterns.md` § Managers § Batch operations). Each extending table that follows repeats these rows, because a consumer holding either interface calls them on it. It declares no readonly data member of its own.
+The keyed record surface `IndexedDBStoreInterface` and `IndexedDBTransactionStoreInterface` both extend, declared once so neither can drift from the other. The keyed verbs batch by their array overload (one in → one out; array in → array out), array-first (`.claude/rules/patterns.md` § Managers § Batch operations). Each extending table that follows repeats these rows, because a consumer holding either interface calls them on it.
 
 | Method    | Returns                                     | Summary                                                                |
 | --------- | ------------------------------------------- | ---------------------------------------------------------------------- |
@@ -150,7 +150,7 @@ The keyed record surface `IndexedDBStoreInterface` and `IndexedDBTransactionStor
 
 #### `IndexedDBStoreInterface`
 
-`IndexedDBRecordStoreInterface` plus `index`, over the readonly data members `name`, `path`, `indexes`, and `increment`. Each call runs in its own implicit transaction.
+`IndexedDBRecordStoreInterface` plus `index`. Each call runs in its own implicit transaction.
 
 | Method    | Returns                                     | Summary                                                                      |
 | --------- | ------------------------------------------- | ---------------------------------------------------------------------------- |
@@ -169,8 +169,6 @@ The keyed record surface `IndexedDBStoreInterface` and `IndexedDBTransactionStor
 
 #### `IndexedDBIndexInterface`
 
-Its readonly data members are `name`, `path`, `unique`, and `multiple`.
-
 | Method    | Returns                                     | Summary                                                                          |
 | --------- | ------------------------------------------- | -------------------------------------------------------------------------------- |
 | `get`     | `Promise<Row \| undefined>`                 | Reads the first record for an index key, or `undefined` on a miss.               |
@@ -184,7 +182,7 @@ Its readonly data members are `name`, `path`, `unique`, and `multiple`.
 
 #### `IndexedDBCursorInterface`
 
-Its readonly data members are `cursor`, `source`, `key`, `primary`, `value`, and `direction` — each a snapshot of the position the cursor stopped on, because IndexedDB reuses the live cursor object on every move.
+Each readonly data member is a snapshot of the position the cursor stopped on, because IndexedDB reuses the live cursor object on every move.
 
 | Method     | Returns                                     | Summary                                                                     |
 | ---------- | ------------------------------------------- | --------------------------------------------------------------------------- |
@@ -196,8 +194,6 @@ Its readonly data members are `cursor`, `source`, `key`, `primary`, `value`, and
 
 #### `IndexedDBTransactionInterface`
 
-Its readonly data members are `transaction`, `mode`, `stores`, `active`, `finished`, and `error`.
-
 | Method   | Returns                              | Summary                                                                                       |
 | -------- | ------------------------------------ | --------------------------------------------------------------------------------------------- |
 | `store`  | `IndexedDBTransactionStoreInterface` | Returns a scope-bound store, which must be one of the transaction's own stores.               |
@@ -206,7 +202,7 @@ Its readonly data members are `transaction`, `mode`, `stores`, `active`, `finish
 
 #### `IndexedDBTransactionStoreInterface`
 
-`IndexedDBRecordStoreInterface` bound to an explicit transaction — the same verbs as a store, without `index` and without an implicit per-call commit. It adds the raw `store` as its readonly data member.
+`IndexedDBRecordStoreInterface` bound to an explicit transaction — the same verbs as a store, without `index` and without an implicit per-call commit. Its `store` is the raw `IDBObjectStore` the owning transaction binds.
 
 | Method    | Returns                                     | Summary                                                                |
 | --------- | ------------------------------------------- | ---------------------------------------------------------------------- |
@@ -224,7 +220,7 @@ Its readonly data members are `transaction`, `mode`, `stores`, `active`, `finish
 
 #### `IndexedDBUpgradeStoreManagerInterface`
 
-Its readonly data member is `names`, the store names the database holds at that point in the upgrade.
+`names` lists the store names the database holds at that point in the upgrade.
 
 | Method   | Returns                              | Summary                                                                  |
 | -------- | ------------------------------------ | ------------------------------------------------------------------------ |
@@ -234,7 +230,7 @@ Its readonly data member is `names`, the store names the database holds at that 
 
 #### `IndexedDBUpgradeIndexManagerInterface`
 
-It declares no readonly data member.
+Reached as `context.indexes`; the store a call names must already exist within the current upgrade transaction.
 
 | Method   | Returns | Summary                                                                         |
 | -------- | ------- | ------------------------------------------------------------------------------- |
@@ -251,7 +247,7 @@ These invariants hold across `src/browser` ↔ `indexeddb.md`:
 4. **In-line or out-of-line keys.** A store with a `path` keys rows by that field; a store with no `path` is out-of-line and takes an explicit key on `set` / `add` (`set(row, key)`).
 5. **Batch by the array overload, array-first.** `get` / `resolve` / `has` / `remove` / `set` / `add` take one value for one result or an array for an array of results (`.claude/rules/patterns.md` § Managers § Batch operations). The array overload is declared first because an array is itself both a record and a compound `IDBValidKey`; to act on a single compound key, pass `IDBKeyRange.only([…])` to `records` / `count`.
 6. **Each standalone call is its own transaction; `read` / `write` are atomic.** A store method opens and commits its own implicit transaction; `db.read` / `db.write` run a scope across stores that commits on resolve and rolls back on a throw. The completion listener is attached BEFORE the scope runs (not after it resolves), so a scope whose last step is a non-IDB `await` — letting the native transaction auto-commit while the scope is still on the stack — still settles `read` / `write` instead of hanging: `complete` can otherwise fire before a listener attached only after the scope returns would ever be wired.
-7. **`get` / `records` narrow to records; `count` / `has` / `keys` operate on keys.** A store or index counts, tests presence, and lists keys over every stored value regardless of shape, but `get` / `resolve` / `records` narrow each value with `isRecord` — so a store holding a non-record value shows `count` greater than `records().length`, and `has` reads `true` for a key `get` reads back as `undefined` (a miss AND a non-record value both read as `undefined` from `get`). A cursor reports the same boundary the same way: `cursor.value` is `Row | undefined` and reads `undefined` for a non-record stored value — see Cursor streaming and in-place mutation, later in this guide.
+7. **`get` / `records` narrow to records; `count` / `has` / `keys` operate on keys.** A store or index counts, tests presence, and lists keys over every stored value regardless of shape, but `get` / `resolve` / `records` narrow each value with `isRecord` — so a store holding a non-record value shows `count` greater than `records().length`, and `has` reads `true` for a key `get` reads back as `undefined` (a miss and a non-record value both read as `undefined` from `get`). A cursor reports the same boundary the same way: `cursor.value` is `Row | undefined` and reads `undefined` for a non-record stored value — see Cursor streaming and in-place mutation, later in this guide.
 8. **DOC ↔ SOURCE method bijection.** Every method in a `## Methods` table is a real call-signature member of that interface in source, and every public method of each behavioral interface is documented — exhaustive, both directions; and each implementing class exposes exactly its interface's public methods, no more (`AGENTS.md` § Documentation contract).
 
 9. **One atomic upgrade boundary.** The built-in create-missing-stores pass and the custom `upgrade` callback run inside the same versionchange transaction and failure boundary. A synchronous built-in/custom fault, or a custom rejection captured while that transaction remains active, aborts the whole upgrade and rejects `connect()` with `UPGRADE`; no partially created store, index, or migration survives. Its `cause` preserves the initiating value even when that value is `undefined`, and a native schema failure retains the nested typed chain (`UPGRADE` → `CONSTRAINT` → native `ConstraintError`). A failed open clears only its attempt-local state, so the same handle can retry. If auto-commit already occurred but the browser reports success after a failure was recorded, the wrapper closes that result before rejecting, preventing an orphan connection; closing cannot undo the already-committed schema.
@@ -262,11 +258,18 @@ These invariants hold across `src/browser` ↔ `indexeddb.md`:
 ### Feature-detecting before opening a database
 
 ```ts
-import { createIndexedDBDatabase, supportsIndexedDB } from '@orkestrel/indexeddb'
+import { createIndexedDBDatabase, rangeFromKey, supportsIndexedDB } from '@orkestrel/indexeddb'
 
 if (supportsIndexedDB()) {
-	const db = createIndexedDBDatabase({ name: 'app', version: 1, stores: { users: { path: 'id' } } })
-	await db.store('users').set({ id: 'u1', name: 'Ada' })
+	const db = createIndexedDBDatabase({
+		name: 'app',
+		version: 1,
+		stores: {
+			users: { path: 'id', indexes: [{ name: 'byAge', path: 'age' }] },
+		},
+	})
+	await db.store('users').set({ id: 'u1', name: 'Ada', age: 36 })
+	await db.store('users').index('byAge').records(rangeFromKey(18)) // adults, index-backed
 }
 ```
 
@@ -324,7 +327,7 @@ cursor?.primary // 'c'
 await db.connect() // idempotent — a later store call would connect lazily anyway
 // ... use the database ...
 db.close() // release the connection, keeping the stored data
-await db.drop() // close AND delete the whole database
+await db.drop() // closes and deletes the whole database
 ```
 
 **`close()` permanently retires the handle** — `open` reads `false` afterwards, and a later `connect()` on the SAME `IndexedDBDatabaseInterface` throws `CLOSED` rather than reconnecting; reopening the database means calling `createIndexedDBDatabase` again. If an open was already pending, IndexedDB cannot cancel that native request, but the wrapper closes any database it eventually returns and rejects the pending `connect()` with `CLOSED`, so no orphan connection survives. This includes an auto-managed open between its current-version probe and missing-store version bump. This is different from the **transient** connection yield described under Practices, later in this guide (another tab's `versionchange`, or an abnormal browser-initiated close): those clear the handle's internal latches WITHOUT retiring it, so the very same handle lazily reconnects on its next operation.
@@ -345,7 +348,7 @@ await users.clear() // empty the whole store
 
 ```ts
 await db.write('users', async (transaction) => {
-	// Every move returns the cursor at the NEW position and leaves the old wrapper
+	// Every move returns the cursor at its new position and leaves the old wrapper
 	// on its own snapshot, so rebind at each step or `update` writes a stale row.
 	let cursor = await transaction.store('users').cursor()
 	if (cursor) cursor = await cursor.advance(1) // skip forward one record

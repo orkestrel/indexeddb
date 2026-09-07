@@ -12,11 +12,11 @@ import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
  * store access.
  *
  * @remarks
- * Wraps `IDBTransaction` with state tracking and typed, scope-bound store access.
- * Constructed by the database's `read` / `write`, which await its completion (or
- * roll it back on a throw). `store` reaches a store within the transaction's scope;
- * `abort` rolls back; `commit` flushes early (the scope's completion commits
- * otherwise). `active` is true until commit or abort; `finished` is its complement.
+ * Wraps `IDBTransaction` with state tracking. Constructed by the database's
+ * `read` / `write`, which await its completion (or roll it back on a throw).
+ * `store` reaches a store within the transaction's scope; `abort` rolls back;
+ * `commit` flushes early (the scope's completion commits otherwise). `active` is
+ * true until commit or abort; `finished` is its complement.
  *
  * @example
  * ```ts

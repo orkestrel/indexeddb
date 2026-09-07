@@ -20,11 +20,18 @@ import { IndexedDBDatabase } from './IndexedDBDatabase.js'
  *
  * @example Feature-detecting before opening a database
  * ```ts
- * import { createIndexedDBDatabase, supportsIndexedDB } from '@orkestrel/indexeddb'
+ * import { createIndexedDBDatabase, rangeFromKey, supportsIndexedDB } from '@orkestrel/indexeddb'
  *
  * if (supportsIndexedDB()) {
- * 	const db = createIndexedDBDatabase({ name: 'app', version: 1, stores: { users: { path: 'id' } } })
- * 	await db.store('users').set({ id: 'u1', name: 'Ada' })
+ * 	const db = createIndexedDBDatabase({
+ * 		name: 'app',
+ * 		version: 1,
+ * 		stores: {
+ * 			users: { path: 'id', indexes: [{ name: 'byAge', path: 'age' }] },
+ * 		},
+ * 	})
+ * 	await db.store('users').set({ id: 'u1', name: 'Ada', age: 36 })
+ * 	await db.store('users').index('byAge').records(rangeFromKey(18)) // adults, index-backed
  * }
  * ```
  */
