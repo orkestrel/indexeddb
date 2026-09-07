@@ -189,7 +189,7 @@ export class IndexedDBDatabase<
 					// Already settled by the native transaction — nothing to roll back.
 				}
 			}
-			// `settled` may still reject (the abort this catch just performed, or the
+			// `settled` may still reject (the abort this catch performed, or the
 			// native transaction having already aborted/errored) after `scope` already
 			// threw — that rejection is redundant with the `error` this catch rethrows
 			// and must not surface as an unhandled rejection.
@@ -323,7 +323,7 @@ export class IndexedDBDatabase<
 	}
 
 	// Build the upgrade context passed to `options.upgrade`, after the built-in
-	// create-missing-stores pass so `stores.names` reflects any store just created.
+	// create-missing-stores pass so `stores.names` reflects any store already created.
 	#context(
 		database: IDBDatabase,
 		transaction: IDBTransaction,

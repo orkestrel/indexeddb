@@ -1003,7 +1003,7 @@ describe('IndexedDBDatabase — abnormal close recovery', () => {
 		expect(db.open).toBe(false)
 
 		// The next operation must lazily reconnect rather than throwing NOT_OPEN
-		// forever — proving `onclose` cleared BOTH latches, not just `#database`.
+		// forever — proving `onclose` cleared BOTH latches, not only `#database`.
 		const record = await db.store('users').get('u1')
 		expect(record).toEqual({ id: 'u1', name: 'Ada' })
 		expect(db.open).toBe(true)

@@ -1,6 +1,6 @@
 {
 	"name": "@orkestrel/indexeddb",
-	"version": "0.0.10",
+	"version": "0.0.11",
 	"description": "A typed, Promise-based wrapper over browser IndexedDB — object stores, secondary indexes, native key ranges, cursors, and versioned schema upgrades. Part of the @orkestrel line.",
 	"keywords": [
 		"browser",
@@ -64,7 +64,8 @@
 		"test:probe": "vitest run --config vite.config.ts --no-cache --reporter=verbose --project probe",
 		"test:bench": "vitest bench --config vite.config.ts --no-cache --project probe",
 		"prepack": "npm run build",
-		"test:setup": "vitest run --config vite.config.ts --no-cache --reporter=dot --project setup"
+		"test:setup": "vitest run --config vite.config.ts --no-cache --reporter=dot --project setup",
+		"docs": "node --experimental-strip-types scripts/docs.ts"
 	},
 	"dependencies": {
 		"@orkestrel/contract": "^0.0.16"

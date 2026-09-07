@@ -70,8 +70,8 @@ export async function dropDatabase(name: string): Promise<void> {
 let databaseCounter = 0
 
 /**
- * A process-unique IndexedDB database name — a monotonic counter under an
- * optional prefix, so concurrent tests never collide on a shared store.
+ * Builds a process-unique IndexedDB database name from a monotonic counter
+ * under an optional prefix, so concurrent tests never collide on a shared store.
  *
  * @param prefix - A readable name segment (defaults to `terrain-idb`)
  * @returns A name no earlier call has returned
@@ -81,7 +81,7 @@ export function uniqueName(prefix = 'terrain-idb'): string {
 	return `${prefix}-${databaseCounter}`
 }
 
-/** A connected test database plus the boilerplate to identify and dispose it. */
+/** Represents a connected test database plus the boilerplate to identify and dispose it. */
 export interface TestDatabaseInterface<Stores extends IndexedDBSchema> {
 	/** The IndexedDB handle, already `connect`ed and ready to use. */
 	readonly db: IndexedDBDatabaseInterface<Stores>
@@ -117,7 +117,7 @@ export function createDatabaseCleanup<Stores extends IndexedDBSchema>(
 }
 
 /**
- * Open a fresh, connected IndexedDB database over a store schema, under a unique
+ * Opens a fresh, connected IndexedDB database over a store schema, under a unique
  * name, returning the handle and a cleanup — the shared opener for every browser
  * test (`.claude/rules/tests.md` § Shared test infrastructure). The handle is
  * already connected, so a test can reach `db.store(...)` immediately; `cleanup`
@@ -143,7 +143,7 @@ export async function createTestDatabase<const Stores extends IndexedDBSchema>(
 }
 
 /**
- * Drive a cursor chain to its end, collecting every visited cursor — the
+ * Drives a cursor chain to its end, collecting every visited cursor — the
  * assertion-friendly counterpart to a manual `while (cursor)` walk. Each step
  * uses `continue()` with no key, so it visits records in the cursor's direction.
  *
@@ -164,8 +164,8 @@ export async function drainCursor(
 }
 
 /**
- * The `code` of a caught value when it is an {@link IndexedDBError}, else
- * `undefined` — lets a test assert the machine-readable code without a
+ * Returns the `code` of a caught value when it is an {@link IndexedDBError},
+ * else `undefined`, letting a test assert the machine-readable code without a
  * conditional `expect` around the `instanceof` narrowing.
  *
  * @param value - A caught value (the rejection / throw under test)
@@ -179,12 +179,12 @@ export function errorCode(value: unknown): string | undefined {
 //
 // The near-duplicate seed-a-`users`-store openers the `src/browser` tests
 // reuse (`.claude/rules/tests.md` § Shared test infrastructure): each opens a
-// uniquely-named database via
+// uniquely-named database through
 // {@link createTestDatabase}, sets the rows, and adds its `cleanup` to the
 // caller's `createTeardown()` list (which the file destroys from an `afterEach`).
-// The seed returns just the connected `db`.
+// The seed returns the connected `db`.
 
-/** The store schema {@link seedUsers} opens — a `users` store with a non-unique
+/** Defines the store schema {@link seedUsers} opens — a `users` store with a non-unique
  *  `byAge` index and a unique `byEmail` index. */
 export const SEED_USER_STORES = {
 	users: {
@@ -196,13 +196,13 @@ export const SEED_USER_STORES = {
 	},
 } as const satisfies IndexedDBSchema
 
-/** The store schema {@link seedStore} opens — a plain `users` store keyed by `id`. */
+/** Defines the store schema {@link seedStore} opens — a plain `users` store keyed by `id`. */
 export const SEED_STORE_STORES = {
 	users: { path: 'id' },
 } as const satisfies IndexedDBSchema
 
 /**
- * Seed a `users` store keyed by `id` with a non-unique `byAge` index and a unique
+ * Seeds a `users` store keyed by `id` with a non-unique `byAge` index and a unique
  * `byEmail` index, three rows spanning ages 20/30/40 — the richer index-bearing seed
  * most `IndexedDBIndex` reads need. Adds its cleanup to `teardown`.
  *
@@ -223,7 +223,7 @@ export async function seedUsers(
 }
 
 /**
- * Seed a plain `users` store keyed by `id` (no secondary index) with three numbered
+ * Seeds a plain `users` store keyed by `id` (no secondary index) with three numbered
  * rows `{ id, n }` (n = 1/2/3) — the minimal seed the `IndexedDBCursor` walks/mutates.
  * Adds its cleanup to `teardown`.
  *

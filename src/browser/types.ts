@@ -39,7 +39,7 @@ export type Row = Record<string, unknown>
  * operation runs after a non-IDB `await` deactivated its transaction — reachable through
  * `IndexedDBTransactionStoreInterface`, and when `IndexedDBTransactionInterface`'s
  * `abort` / `commit` are called on an already-finished transaction), `READONLY`
- * (native `ReadOnlyError` — a write attempted on a `readonly` transaction, e.g.
+ * (native `ReadOnlyError` — a write attempted on a `readonly` transaction, for example
  * mutating through a cursor opened in a `read` scope), `INVALID` (native
  * `InvalidStateError` — a defensive mapping for a deleted store/index or
  * similarly invalid native handle; not cleanly reachable through this
@@ -112,8 +112,8 @@ export type IndexedDBSchema = Readonly<Record<string, StoreDefinition>>
  *
  * @remarks
  * Reached as `context.stores` on {@link IndexedDBUpgradeContext}. `names` lists
- * the stores the database holds at that moment, so it already reflects any store
- * the built-in create-missing pass just created. `create` / `drop` add or remove
+ * the stores the database holds at that moment, so it reflects any store
+ * the built-in create-missing pass already created. `create` / `drop` add or remove
  * a whole store; `store` reaches a transaction-bound store for data migration.
  * Versionchange-only: every call must stay within the upgrade transaction — no
  * non-IDB `await`, or it auto-commits and the upgrade fails.
@@ -164,7 +164,7 @@ export interface IndexedDBUpgradeIndexManagerInterface {
  *
  * @remarks
  * Runs INSIDE `onupgradeneeded`, after the built-in create-missing-stores pass —
- * so `stores.names` already reflects any store just created from the declared
+ * so `stores.names` already reflects any store created from the declared
  * schema. `transaction` is the raw versionchange `IDBTransaction`, the escape hatch
  * for anything the raw API offers that this wrapper does not model directly; `old` /
  * `version` are the prior and target database versions (`old` is `0` on first
