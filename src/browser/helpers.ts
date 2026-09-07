@@ -135,7 +135,8 @@ export async function readRecord(
 }
 
 /**
- * Reads many records from a store or index over an optional key range.
+ * Reads many records from a store or index over an optional key range, narrowing each
+ * to a `Row`.
  *
  * @remarks
  * The shared bulk read of every store-like class: issue the native `getAll` over
@@ -208,7 +209,7 @@ export function rangeAboveKey(value: IDBValidKey): IDBKeyRange {
 }
 
 /**
- * Builds a key range starting at one key.
+ * Builds a key range starting at and including one key.
  *
  * @param value - The included lower boundary
  * @returns A range containing keys greater than or equal to `value`
@@ -228,7 +229,7 @@ export function rangeBelowKey(value: IDBValidKey): IDBKeyRange {
 }
 
 /**
- * Builds a key range ending at one key.
+ * Builds a key range ending at and including one key.
  *
  * @param value - The included upper boundary
  * @returns A range containing keys less than or equal to `value`

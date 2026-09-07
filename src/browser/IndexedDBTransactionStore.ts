@@ -10,7 +10,8 @@ import { hasKey, promisifyRequest, readRecord, readRecords, wrapCall } from './h
 import { IndexedDBCursor } from './IndexedDBCursor.js'
 
 /**
- * Represents an object store bound to an explicit transaction.
+ * Represents an object store bound to an explicit transaction, with no implicit
+ * per-call commit.
  *
  * @remarks
  * The same CRUD surface as a standalone store, but every call runs in the owning

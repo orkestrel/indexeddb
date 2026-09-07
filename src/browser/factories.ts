@@ -6,7 +6,7 @@ import type {
 import { IndexedDBDatabase } from './IndexedDBDatabase.js'
 
 /**
- * Creates a browser-native IndexedDB database over a store schema.
+ * Creates a typed, lazily-connecting IndexedDB database over a store schema.
  *
  * @remarks
  * The `const` type parameter captures the literal store names, so `db.store(name)`
@@ -18,19 +18,14 @@ import { IndexedDBDatabase } from './IndexedDBDatabase.js'
  * @param options - The database `name`, `version`, and `stores` schema
  * @returns A typed {@link IndexedDBDatabaseInterface}
  *
- * @example
+ * @example Feature-detecting before opening a database
  * ```ts
- * import { createIndexedDBDatabase, rangeFromKey } from '@orkestrel/indexeddb'
+ * import { createIndexedDBDatabase, supportsIndexedDB } from '@orkestrel/indexeddb'
  *
- * const db = createIndexedDBDatabase({
- * 	name: 'app',
- * 	version: 1,
- * 	stores: {
- * 		users: { path: 'id', indexes: [{ name: 'byAge', path: 'age' }] },
- * 	},
- * })
- * await db.store('users').set({ id: 'u1', name: 'Ada', age: 36 })
- * await db.store('users').index('byAge').records(rangeFromKey(18)) // adults, index-backed
+ * if (supportsIndexedDB()) {
+ * 	const db = createIndexedDBDatabase({ name: 'app', version: 1, stores: { users: { path: 'id' } } })
+ * 	await db.store('users').set({ id: 'u1', name: 'Ada' })
+ * }
  * ```
  */
 export function createIndexedDBDatabase<const Stores extends IndexedDBSchema>(

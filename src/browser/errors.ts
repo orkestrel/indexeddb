@@ -9,7 +9,8 @@
 import type { IndexedDBErrorCode } from './types.js'
 
 /**
- * Represents an error thrown by the IndexedDB wrapper.
+ * Represents an error thrown by the IndexedDB wrapper, carrying a machine-readable
+ * `code` and an optional `context` beside the native cause.
  *
  * @remarks
  * Carries an {@link IndexedDBErrorCode} and the originating native error as the

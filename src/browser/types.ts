@@ -75,7 +75,7 @@ export type IndexedDBErrorCode =
 export type KeyPath = string | readonly string[]
 
 /**
- * Represents a secondary index on a store.
+ * Represents the declaration of a secondary index — its name, key path, and uniqueness.
  *
  * @remarks
  * `name` identifies the index for `store.index(name)`; `path` is the field(s) it
@@ -90,7 +90,8 @@ export interface IndexDefinition {
 }
 
 /**
- * Represents a store's schema.
+ * Represents the declaration of one object store — its key path, key generation, and
+ * secondary indexes.
  *
  * @remarks
  * `path` is the in-line key path (omit it for an **out-of-line** store, where the
@@ -129,8 +130,11 @@ export type IndexedDBSchema = Readonly<Record<string, StoreDefinition>>
  */
 export interface IndexedDBUpgradeStoreManagerInterface {
 	readonly names: readonly string[]
+	/** Creates a store from its definition, within the upgrade transaction. */
 	create(name: string, definition: StoreDefinition): void
+	/** Deletes a store and everything it holds, within the upgrade transaction. */
 	drop(name: string): void
+	/** Returns a transaction-bound store for migrating data during the upgrade. */
 	store(name: string): IndexedDBTransactionStoreInterface
 }
 
@@ -154,7 +158,9 @@ export interface IndexedDBUpgradeStoreManagerInterface {
  * ```
  */
 export interface IndexedDBUpgradeIndexManagerInterface {
+	/** Creates a secondary index on an existing store, within the upgrade transaction. */
 	create(store: string, definition: IndexDefinition): void
+	/** Removes a named secondary index from a store, within the upgrade transaction. */
 	drop(store: string, name: string): void
 }
 
@@ -231,7 +237,8 @@ export interface IndexedDBCursorOptions {
 // === Cursor
 
 /**
- * Represents a promisified value cursor for streaming and in-place mutation.
+ * Represents the contract of a promisified value cursor for streaming and in-place
+ * mutation.
  *
  * @remarks
  * Wraps `IDBCursorWithValue`. `key` / `primary` / `value` snapshot the current
@@ -254,6 +261,7 @@ export interface IndexedDBCursorInterface {
 	readonly primary: IDBValidKey
 	readonly value: Row | undefined
 	readonly direction: IDBCursorDirection
+	/** Advances to the next record, or to the next record at or after a given key. */
 	continue(key?: IDBValidKey): Promise<IndexedDBCursorInterface | null>
 	/**
 	 * Advances to a given index key and primary key.
@@ -270,15 +278,18 @@ export interface IndexedDBCursorInterface {
 	 *   `ERROR_CODES` does not map
 	 */
 	seek(key: IDBValidKey, primary: IDBValidKey): Promise<IndexedDBCursorInterface | null>
+	/** Skips forward a given number of records. */
 	advance(count: number): Promise<IndexedDBCursorInterface | null>
+	/** Overwrites the record at the current position. */
 	update(value: Row): Promise<IDBValidKey>
+	/** Deletes the record at the current position. */
 	remove(): Promise<void>
 }
 
 // === Index
 
 /**
- * Represents a secondary index — read access by an indexed key path.
+ * Represents the contract of a secondary index — read access by an indexed key path.
  *
  * @remarks
  * Indexes are read-only views over a store. `get` / `resolve` fetch the first
@@ -293,24 +304,32 @@ export interface IndexedDBIndexInterface {
 	readonly path: KeyPath
 	readonly unique: boolean
 	readonly multiple: boolean
+	/** Reads the first record for an index key, or `undefined` on a miss. */
 	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<Row | undefined>>
 	get(key: IDBValidKey): Promise<Row | undefined>
+	/** Reads the first record for an index key, throwing `NOT_FOUND` on a miss. */
 	resolve(keys: readonly IDBValidKey[]): Promise<readonly Row[]>
 	resolve(key: IDBValidKey): Promise<Row>
+	/** Reads the matching records over an optional index-key range. */
 	records(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly Row[]>
+	/** Lists the primary keys of the matching records over an optional index-key range. */
 	keys(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly IDBValidKey[]>
+	/** Reads the primary key an index key maps to, or `undefined` on a miss. */
 	primary(key: IDBValidKey): Promise<IDBValidKey | undefined>
+	/** Checks whether an index key is present. */
 	has(keys: readonly IDBValidKey[]): Promise<readonly boolean[]>
 	has(key: IDBValidKey): Promise<boolean>
+	/** Counts the matching records within an optional index-key range. */
 	count(query?: IDBKeyRange | IDBValidKey): Promise<number>
+	/** Opens a read-only cursor over the matches, or resolves `null` where none match. */
 	cursor(options?: IndexedDBCursorOptions): Promise<IndexedDBCursorInterface | null>
 }
 
 // === Record store
 
 /**
- * Represents the keyed record surface of an object store, in or out of an explicit
- * transaction.
+ * Represents the contract the object-store surfaces share — the keyed record verbs, in
+ * or out of an explicit transaction.
  *
  * @remarks
  * The member set {@link IndexedDBStoreInterface} and
@@ -326,30 +345,41 @@ export interface IndexedDBIndexInterface {
  * `IDBKeyRange.only([…])` to `records` / `count`.
  */
 export interface IndexedDBRecordStoreInterface {
+	/** Reads the record at a primary key, or `undefined` on a miss. */
 	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<Row | undefined>>
 	get(key: IDBValidKey): Promise<Row | undefined>
+	/** Reads the record at a primary key, throwing `NOT_FOUND` on a miss. */
 	resolve(keys: readonly IDBValidKey[]): Promise<readonly Row[]>
 	resolve(key: IDBValidKey): Promise<Row>
+	/** Reads the stored records over an optional key range. */
 	records(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly Row[]>
+	/** Lists the stored primary keys over an optional key range. */
 	keys(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly IDBValidKey[]>
+	/** Checks whether a primary key is present. */
 	has(keys: readonly IDBValidKey[]): Promise<readonly boolean[]>
 	has(key: IDBValidKey): Promise<boolean>
+	/** Counts the stored records within an optional key range. */
 	count(query?: IDBKeyRange | IDBValidKey): Promise<number>
+	/** Writes a record, overwriting whatever the key already holds. */
 	set(values: readonly Row[]): Promise<readonly IDBValidKey[]>
 	set(value: Row, key?: IDBValidKey): Promise<IDBValidKey>
+	/** Writes a record, throwing `CONSTRAINT` where the key is already taken. */
 	add(values: readonly Row[]): Promise<readonly IDBValidKey[]>
 	add(value: Row, key?: IDBValidKey): Promise<IDBValidKey>
+	/** Deletes the record at a primary key. */
 	remove(keys: readonly IDBValidKey[]): Promise<void>
 	remove(key: IDBValidKey): Promise<void>
+	/** Deletes every record the store holds. */
 	clear(): Promise<void>
+	/** Opens a cursor over the records, or resolves `null` where none match. */
 	cursor(options?: IndexedDBCursorOptions): Promise<IndexedDBCursorInterface | null>
 }
 
 // === Store
 
 /**
- * Represents an object store — the keyed record surface plus the store's own schema
- * metadata and `index` accessor.
+ * Represents the contract of an object store — the keyed record surface plus the
+ * store's own schema metadata and `index` accessor.
  *
  * @remarks
  * {@link IndexedDBRecordStoreInterface} plus the store's own schema metadata and
@@ -363,13 +393,14 @@ export interface IndexedDBStoreInterface extends IndexedDBRecordStoreInterface {
 	readonly path: KeyPath | undefined
 	readonly indexes: readonly string[]
 	readonly increment: boolean
+	/** Returns a read-only view over one of the store's declared secondary indexes. */
 	index(name: string): IndexedDBIndexInterface
 }
 
 // === Transaction store
 
 /**
- * Represents an object store bound to an explicit transaction.
+ * Represents the contract of an object store bound to an explicit transaction.
  *
  * @remarks
  * The same {@link IndexedDBRecordStoreInterface} surface as
@@ -385,7 +416,7 @@ export interface IndexedDBTransactionStoreInterface extends IndexedDBRecordStore
 // === Transaction
 
 /**
- * Represents an explicit transaction over one or more stores.
+ * Represents the contract of an explicit transaction over one or more stores.
  *
  * @remarks
  * Obtained through the `scope` callback of the database's `read` / `write`. `store`
@@ -402,18 +433,21 @@ export interface IndexedDBTransactionInterface<Stores extends IndexedDBSchema = 
 	readonly active: boolean
 	readonly finished: boolean
 	readonly error: DOMException | null
+	/** Returns a scope-bound store, which must be one of the transaction's own stores. */
 	store<K extends keyof Stores & string>(name: K): IndexedDBTransactionStoreInterface
+	/** Rolls every write in the transaction back, throwing `INACTIVE` where it has already finished. */
 	abort(): void
+	/** Flushes the transaction early, throwing `INACTIVE` where it has already finished. */
 	commit(): void
 }
 
 // === Database
 
 /**
- * Represents a browser-native IndexedDB database.
+ * Represents the contract of a typed, lazily-connecting IndexedDB database.
  *
  * @remarks
- * A typed, Promise-based handle over `IDBDatabase`. It connects lazily on first
+ * A Promise-based handle over `IDBDatabase`. It connects lazily on first
  * use (`connect`, also awaited by every store operation); `store` reaches a typed
  * store; `read` / `write` run an atomic scope over one or more stores; `close`
  * releases the connection and `drop` deletes the database. `stores` lists the
@@ -430,16 +464,22 @@ export interface IndexedDBDatabaseInterface<Stores extends IndexedDBSchema = Ind
 	readonly version: number
 	readonly stores: readonly string[]
 	readonly open: boolean
+	/** Opens the connection, lazily and idempotently, waiting through a native block. */
 	connect(): Promise<IDBDatabase>
+	/** Returns a typed handle for one declared store. */
 	store<K extends keyof Stores & string>(name: K): IndexedDBStoreInterface
+	/** Runs a readonly scope over one or more stores. */
 	read(
 		stores: (keyof Stores & string) | ReadonlyArray<keyof Stores & string>,
 		scope: (transaction: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
 	): Promise<void>
+	/** Runs a readwrite scope, committing when it resolves and rolling back when it throws. */
 	write(
 		stores: (keyof Stores & string) | ReadonlyArray<keyof Stores & string>,
 		scope: (transaction: IndexedDBTransactionInterface<Stores>) => void | Promise<void>,
 	): Promise<void>
+	/** Retires the handle permanently, releasing the connection and any later open result. */
 	close(): void
+	/** Closes and deletes the database, waiting through a native block. */
 	drop(): Promise<void>
 }
