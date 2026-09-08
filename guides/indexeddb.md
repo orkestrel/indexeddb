@@ -9,6 +9,8 @@ Its job is to type IndexedDB's event-driven, callback-shaped, structurally-untyp
 
 ## Surface
 
+Create a database from a store schema, then read and write through the lazily-connecting store handle it returns.
+
 ```ts
 import { createIndexedDBDatabase, rangeFromKey } from '@orkestrel/indexeddb'
 
@@ -76,15 +78,17 @@ await users.index('byAge').records(rangeFromKey(18)) // adults, index-backed (O(
 
 ### Constants
 
-| API           | Kind  | Summary                                                               |
-| ------------- | ----- | --------------------------------------------------------------------- |
-| `ERROR_CODES` | const | Maps native `DOMException.name` → the wrapper's `IndexedDBErrorCode`. |
+A `Shape` cell holds the constant's declared type.
+
+| API           | Kind  | Shape                                          | Summary                                                               |
+| ------------- | ----- | ---------------------------------------------- | --------------------------------------------------------------------- |
+| `ERROR_CODES` | const | `Readonly<Record<string, IndexedDBErrorCode>>` | Maps native `DOMException.name` → the wrapper's `IndexedDBErrorCode`. |
 
 `wrapError` reads this frozen map at the request boundary, falling back to `UNKNOWN` for a native name it does not carry.
 
 ### Types
 
-A `Shape` cell holds an interface's data members as bare names in braces, `?` marking an optional member and `plus` introducing its call-signature members, and a type alias's own type literal with a union's arms escaped as `\|`.
+A `Shape` cell holds an interface's data members as bare names in braces, `?` marking an optional member and `plus` introducing its call-signature members, and a type alias's own type literal with a union's arms escaped as `\|`. An extended interface's name comes before `plus`, with the members it adds after.
 
 | API                                     | Kind      | Shape                                                                                                                                                                  | Summary                                                                                                                          |
 | --------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -101,13 +105,11 @@ A `Shape` cell holds an interface's data members as bare names in braces, `?` ma
 | `IndexedDBErrorCode`                    | type      | `'NOT_OPEN' \| 'CLOSED' \| 'NOT_FOUND' \| 'CONSTRAINT' \| 'QUOTA' \| 'ABORTED' \| 'DATA' \| 'OPEN' \| 'UPGRADE' \| 'INACTIVE' \| 'READONLY' \| 'INVALID' \| 'UNKNOWN'` | Represents a machine-readable `IndexedDBError` code.                                                                             |
 | `IndexedDBDatabaseInterface`            | interface | `{ database, name, version, stores, open } plus connect, store, read, write, close, drop`                                                                              | Represents the contract of a typed, lazily-connecting IndexedDB database.                                                        |
 | `IndexedDBRecordStoreInterface`         | interface | `{} plus get, resolve, records, keys, has, count, set, add, remove, clear, cursor`                                                                                     | Represents the contract the object-store surfaces share — the keyed record verbs, in or out of an explicit transaction.          |
-| `IndexedDBStoreInterface`               | interface | `{ name, path, indexes, increment } plus get, resolve, records, keys, has, count, set, add, remove, clear, index, cursor`                                              | Represents the contract of an object store — the keyed record surface plus the store's own schema metadata and `index` accessor. |
+| `IndexedDBStoreInterface`               | interface | `IndexedDBRecordStoreInterface plus { name, path, indexes, increment } plus index`                                                                                     | Represents the contract of an object store — the keyed record surface plus the store's own schema metadata and `index` accessor. |
 | `IndexedDBIndexInterface`               | interface | `{ name, path, unique, multiple } plus get, resolve, records, keys, primary, has, count, cursor`                                                                       | Represents the contract of a secondary index — read access by an indexed key path.                                               |
 | `IndexedDBCursorInterface`              | interface | `{ cursor, source, key, primary, value, direction } plus continue, seek, advance, update, remove`                                                                      | Represents the contract of a promisified value cursor for streaming and in-place mutation.                                       |
 | `IndexedDBTransactionInterface`         | interface | `{ transaction, mode, stores, active, finished, error } plus store, abort, commit`                                                                                     | Represents the contract of an explicit transaction over one or more stores.                                                      |
-| `IndexedDBTransactionStoreInterface`    | interface | `{ store } plus get, resolve, records, keys, has, count, set, add, remove, clear, cursor`                                                                              | Represents the contract of an object store bound to an explicit transaction.                                                     |
-
-An extending interface's cell lists every member it declares or inherits, so `IndexedDBStoreInterface` and `IndexedDBTransactionStoreInterface` each carry the `IndexedDBRecordStoreInterface` verbs.
+| `IndexedDBTransactionStoreInterface`    | interface | `IndexedDBRecordStoreInterface plus { store }`                                                                                                                         | Represents the contract of an object store bound to an explicit transaction.                                                     |
 
 Values are this package's own `Row` (a record), narrowed from IndexedDB's structured clone with `isRecord` (from `@orkestrel/contract`) at the read boundary — an `as`-free bridge. Keys are the full native `IDBValidKey`, so the wrapper speaks IndexedDB's whole key space.
 
@@ -257,6 +259,8 @@ These invariants hold across `src/browser` ↔ `indexeddb.md`:
 
 ### Feature-detecting before opening a database
 
+Checks for IndexedDB support before creating and using a database, so a non-browser runtime or a privacy mode without storage never reaches the open call.
+
 ```ts
 import { createIndexedDBDatabase, rangeFromKey, supportsIndexedDB } from '@orkestrel/indexeddb'
 
@@ -274,6 +278,8 @@ if (supportsIndexedDB()) {
 ```
 
 ### Index-backed reads with key ranges
+
+Reads a primary-key range and an indexed range with the built-in key-range helpers and a native `IDBKeyRange`.
 
 ```ts
 import {
@@ -299,6 +305,8 @@ The single-boundary builders each fix a native boolean argument that reads as no
 
 ### Cursor streaming and in-place mutation
 
+Streams a store's records with a cursor, removing a record in place as the loop passes over it.
+
 ```ts
 let cursor = await db.store('users').cursor()
 while (cursor) {
@@ -311,6 +319,8 @@ A `store` cursor runs in a `readwrite` transaction, so `update` / `remove` work;
 
 ### Seeking an index cursor to one primary key
 
+Seeks an index cursor to the one primary key it needs among several rows sharing the same index key.
+
 ```ts
 // Three rows share the index key 30, so `seek` picks the one whose primary key is
 // 'c' — which is what the native `continuePrimaryKey` exists for.
@@ -322,6 +332,8 @@ cursor?.primary // 'c'
 `seek` is valid only on a cursor whose `source` is an index. It drives the native `continuePrimaryKey`, which IndexedDB defines for an index cursor alone, so a store cursor from `db.store(name).cursor()` throws `InvalidAccessError` — a name `ERROR_CODES` does not map, so it reaches the caller as an `IndexedDBError` of code `UNKNOWN`. Move a store cursor with `continue` or `advance` instead.
 
 ### Connection lifecycle: connect, close, drop
+
+Connects explicitly, closes the handle to release the connection, then drops the whole database.
 
 ```ts
 await db.connect() // idempotent — a later store call would connect lazily anyway
@@ -336,6 +348,8 @@ An open or deletion held up by another live connection remains pending. IndexedD
 
 ### Reading, testing, and clearing a store
 
+Reads with a `NOT_FOUND`-throwing lookup, tests presence of a batch of keys, removes a batch, then clears the store.
+
 ```ts
 const users = db.store('users')
 await users.resolve('u1') // like get, but throws NOT_FOUND on a miss
@@ -345,6 +359,8 @@ await users.clear() // empty the whole store
 ```
 
 ### Explicit transaction control and cursor movement
+
+Drives an explicit transaction scope, advancing and updating a cursor within it before committing early.
 
 ```ts
 await db.write('users', async (transaction) => {
@@ -359,6 +375,8 @@ await db.write('users', async (transaction) => {
 ```
 
 ### The request-boundary helpers directly
+
+Drives the request-boundary helpers directly against a raw `IDBObjectStore` and `IDBTransaction`, and maps a raw `DOMException` on its own.
 
 ```ts
 import {
@@ -389,6 +407,8 @@ wrapError(null) // the same DOMException → IndexedDBError mapping every bridge
 
 ### Branching on a typed fault
 
+Branches on a typed `IndexedDBError` code, falling back to an upsert when an insert collides on a duplicate key.
+
 ```ts
 import { IndexedDBError } from '@orkestrel/indexeddb'
 
@@ -405,6 +425,8 @@ try {
 Every terminal native `DOMException` crosses the request boundary as an `IndexedDBError` carrying a machine-readable `code` (`CONSTRAINT`, `NOT_FOUND`, `QUOTA`, `ABORTED`, `READONLY`, `DATA`, …), so a `catch` branches on `error.code` rather than parsing a message string. A native `blocked` notification is not a terminal exception and has no error code; the operation remains pending. `ReadOnlyError` (a write attempted on a `readonly` transaction — for example mutating through a cursor opened by `index(...).cursor()`, which always runs read-only) maps to `READONLY`; both `DataError` (an invalid key) and `DataCloneError` (a value IndexedDB's structured clone cannot serialize, for example a function) map to `DATA`.
 
 ### Narrowing a caught value with `isIndexedDBError`
+
+Narrows a caught value of unknown shape to an `IndexedDBError` before reading its `code`.
 
 ```ts
 import { isIndexedDBError } from '@orkestrel/indexeddb'
