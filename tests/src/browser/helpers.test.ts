@@ -18,7 +18,7 @@ import {
 } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import { captureError, createTeardown } from '@orkestrel/test'
-import { createTestDatabase, dropDatabase, errorCode, uniqueName } from '../../setupBrowser.js'
+import { createTestDatabase, dropDatabase, errorCode, mintDatabase } from '../../setupBrowser.js'
 
 // The browser surface's helpers (`src/browser/helpers.ts`), exercised in real
 // Chromium: the feature probe `supportsIndexedDB` (the entry gate a consumer
@@ -158,7 +158,7 @@ describe('readRecord / readRecords / hasKey — over a real store', () => {
 
 describe('createIndex — index-DDL leaf', () => {
 	it('translates an IndexDefinition into a native createIndex call, honouring unique / multiple', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const opened = await new Promise<IDBDatabase>((resolve, reject) => {
 			const request = globalThis.indexedDB.open(name, 1)

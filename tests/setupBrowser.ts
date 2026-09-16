@@ -76,7 +76,7 @@ let databaseCounter = 0
  * @param prefix - A readable name segment (defaults to `terrain-idb`)
  * @returns A name no earlier call has returned
  */
-export function uniqueName(prefix = 'terrain-idb'): string {
+export function mintDatabase(prefix = 'terrain-idb'): string {
 	databaseCounter += 1
 	return `${prefix}-${databaseCounter}`
 }
@@ -132,7 +132,7 @@ export async function createTestDatabase<const Stores extends IndexedDBSchema>(
 	stores: Stores,
 	options?: { readonly version?: number; readonly prefix?: string },
 ): Promise<TestDatabaseInterface<Stores>> {
-	const name = uniqueName(options?.prefix)
+	const name = mintDatabase(options?.prefix)
 	const db = createIndexedDBDatabase({
 		name,
 		...(options?.version === undefined ? {} : { version: options.version }),

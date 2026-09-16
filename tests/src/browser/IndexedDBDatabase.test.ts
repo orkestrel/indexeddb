@@ -7,7 +7,7 @@ import {
 } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import { captureError, createTeardown, waitForDelay } from '@orkestrel/test'
-import { createTestDatabase, dropDatabase, errorCode, uniqueName } from '../../setupBrowser.js'
+import { createTestDatabase, dropDatabase, errorCode, mintDatabase } from '../../setupBrowser.js'
 
 // The `IndexedDBDatabaseInterface` surface in real Chromium: lazy connect and
 // state (`name` / `version` / `stores` / `open` / `database`), the `store`
@@ -24,7 +24,7 @@ afterEach(teardown.destroy)
 
 describe('IndexedDBDatabase — connection and state', () => {
 	it('connects lazily and reports its state', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		const db = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		teardown.add(async () => {
 			db.close()
@@ -63,7 +63,7 @@ describe('IndexedDBDatabase — connection and state', () => {
 		expect(errorCode(emptyName)).toBe('OPEN')
 
 		const badVersion = captureError(() =>
-			createIndexedDBDatabase({ name: uniqueName(), version: 0, stores: {} }),
+			createIndexedDBDatabase({ name: mintDatabase(), version: 0, stores: {} }),
 		)
 		expect(errorCode(badVersion)).toBe('OPEN')
 	})
@@ -81,7 +81,7 @@ describe('IndexedDBDatabase — connection and state', () => {
 
 describe('IndexedDBDatabase — blocked lifecycle', () => {
 	it('keeps one versioned open pending until its raw blocker closes', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const request = globalThis.indexedDB.open(name, 1)
 		request.addEventListener('upgradeneeded', () => {
@@ -136,7 +136,7 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 	})
 
 	it('keeps deletion pending and the database present until its raw blocker closes', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const request = globalThis.indexedDB.open(name, 1)
 		const blocker = await promisifyRequest(request)
@@ -175,7 +175,7 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 	})
 
 	it('retires an explicit-version open closed while blocked without orphaning its result', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const request = globalThis.indexedDB.open(name, 1)
 		request.addEventListener('upgradeneeded', () => {
@@ -224,7 +224,7 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 	})
 
 	it('retires an auto-managed second open closed while blocked without orphaning its result', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const request = globalThis.indexedDB.open(name, 1)
 		request.addEventListener('upgradeneeded', () => {
@@ -272,7 +272,7 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 	})
 
 	it('retires a blocked open when drop is requested without orphaning its result', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const request = globalThis.indexedDB.open(name, 1)
 		request.addEventListener('upgradeneeded', () => {
@@ -416,7 +416,7 @@ describe('IndexedDBDatabase — read / write scopes', () => {
 
 describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 	it('opens at the current version and bumps once to create a newly declared store', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		// First open, auto-managed: creates `users`, settling at version 1.
 		const first = createIndexedDBDatabase({ name, stores: { users: { path: 'id' } } })
@@ -444,7 +444,7 @@ describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 	})
 
 	it('creates new stores on an explicit version upgrade', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
@@ -467,7 +467,7 @@ describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 	})
 
 	it('contains built-in schema faults across retries without partial state or orphan connections', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const seed = createIndexedDBDatabase({
 			name,
@@ -551,7 +551,7 @@ describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 
 describe('IndexedDBDatabase — upgrade hook', () => {
 	it('drops a store while leaving others intact', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({
 			name,
@@ -581,7 +581,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 	})
 
 	it('adds an index to an existing store through context.indexes.create', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
@@ -608,7 +608,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 	})
 
 	it('adds a unique index to a store created in the same upgrade through context.stores.create', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
@@ -648,7 +648,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 	})
 
 	it('removes an index through context.indexes.drop', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({
 			name,
@@ -678,7 +678,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 	})
 
 	it('migrates data within the upgrade transaction through context.stores.store', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
@@ -711,7 +711,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 	})
 
 	it('rejects connect() cleanly when an async upgrade throws after an awaited request', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const failure = new Error('migration boom')
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
@@ -760,7 +760,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 	})
 
 	it('preserves a synchronous undefined upgrade failure as a present cause', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		const failure: unknown = undefined
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
@@ -789,7 +789,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 	})
 
 	it('preserves an asynchronously rejected undefined upgrade failure as a present cause', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		const failure: unknown = undefined
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
@@ -816,7 +816,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 	})
 
 	it('creates a store through context.stores.create, honouring its definition', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
@@ -845,7 +845,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 	})
 
 	it('surfaces a typed IndexedDBError when context.stores.drop targets a missing store', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
@@ -870,7 +870,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 	})
 
 	it('surfaces a typed IndexedDBError when context.indexes.drop targets a missing index', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
@@ -895,7 +895,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 	})
 
 	it('exposes old / version / stores.names correctly on the context', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await v1.connect()
@@ -927,7 +927,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 
 describe('IndexedDBDatabase — versionchange yields a live connection', () => {
 	it('closes the first connection so a second connection at a higher version can open', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const first = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await first.connect()
@@ -951,7 +951,7 @@ describe('IndexedDBDatabase — versionchange yields a live connection', () => {
 	})
 
 	it('lazily reconnects a yielded handle at the new version on the next operation', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		// Auto-managed (no pinned `version`): the lazy reconnect below re-opens
 		// without a fixed version, so it naturally lands on whatever version is
@@ -1014,7 +1014,7 @@ describe('IndexedDBDatabase — persistence and drop', () => {
 	it('persists across a close and reopen over the same name', async () => {
 		// Open WITHOUT the shared cleanup: its cleanup deletes the database, but this
 		// test must keep the bytes on disk across the reopen below.
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const db = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
 		await db.store('users').set({ id: 'u1', name: 'Ada' })

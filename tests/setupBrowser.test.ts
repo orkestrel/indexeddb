@@ -7,14 +7,14 @@ import {
 	errorCode,
 	SEED_STORE_STORES,
 	SEED_USER_STORES,
-	uniqueName,
+	mintDatabase,
 } from './setupBrowser.js'
 
 // The browser test setup module's proof (`tests/setupBrowser.ts`). Its subject is the exported
 // test infrastructure the `src:browser` suites are driven over.
 //
 // The `setup` project runs in Node with the browser disabled, so this file proves the module's
-// host-independent half only: `uniqueName`, arithmetic over a module counter; `errorCode`, an
+// host-independent half only: `mintDatabase`, arithmetic over a module counter; `errorCode`, an
 // `instanceof` narrowing over a caught value; `drainCursor`'s empty-source contract, the one
 // branch it takes before any cursor exists; `createDatabaseCleanup`, which returns its cleanup
 // without reaching storage; and the `SEED_USER_STORES` / `SEED_STORE_STORES` schema tables,
@@ -46,7 +46,7 @@ import {
 // `IndexedDBIndex` suite reads back off a live store, so the table cannot satisfy the assertion
 // by restating itself.
 
-/** Read the trailing counter segment a `uniqueName` result carries. */
+/** Read the trailing counter segment a `mintDatabase` result carries. */
 function readCounter(name: string): number {
 	return Number(name.slice(name.lastIndexOf('-') + 1))
 }
@@ -64,25 +64,25 @@ function readStores(stores: IndexedDBSchema): readonly string[] {
 	return Object.keys(stores).sort()
 }
 
-describe('uniqueName', () => {
+describe('mintDatabase', () => {
 	it('returns a name no earlier call returned', () => {
-		const names = [uniqueName(), uniqueName(), uniqueName(), uniqueName()]
+		const names = [mintDatabase(), mintDatabase(), mintDatabase(), mintDatabase()]
 		expect(new Set(names).size).toBe(names.length)
 	})
 
 	it('numbers every name from one shared counter, whatever the prefix', () => {
-		const first = readCounter(uniqueName())
-		const prefixed = readCounter(uniqueName('indexeddb-proof'))
-		const last = readCounter(uniqueName())
+		const first = readCounter(mintDatabase())
+		const prefixed = readCounter(mintDatabase('indexeddb-proof'))
+		const last = readCounter(mintDatabase())
 		expect(prefixed).toBe(first + 1)
 		expect(last).toBe(prefixed + 1)
 	})
 
 	it('writes the caller prefix ahead of the counter, and defaults it to terrain-idb', () => {
-		const defaulted = uniqueName()
+		const defaulted = mintDatabase()
 		expect(defaulted.slice(0, defaulted.lastIndexOf('-'))).toBe('terrain-idb')
 
-		const named = uniqueName('indexeddb-proof')
+		const named = mintDatabase('indexeddb-proof')
 		expect(named.slice(0, named.lastIndexOf('-'))).toBe('indexeddb-proof')
 	})
 })
@@ -116,7 +116,7 @@ describe('createDatabaseCleanup', () => {
 		// inside `connect()`, so the handle this builds exists under a Node project with no
 		// storage at all. What the cleanup then does is proven by every browser suite that
 		// opens a database through `createTestDatabase` and tears it down.
-		const name = uniqueName('indexeddb-cleanup')
+		const name = mintDatabase('indexeddb-cleanup')
 		const db = createIndexedDBDatabase({ name, stores: SEED_STORE_STORES })
 		expect(typeof createDatabaseCleanup(db, name)).toBe('function')
 	})

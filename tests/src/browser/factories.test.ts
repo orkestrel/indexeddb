@@ -1,7 +1,7 @@
 import { createIndexedDBDatabase, rangeFromKey } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createTeardown } from '@orkestrel/test'
-import { dropDatabase, uniqueName } from '../../setupBrowser.js'
+import { dropDatabase, mintDatabase } from '../../setupBrowser.js'
 
 // `createIndexedDBDatabase` (`src/browser/factories.ts`) in real
 // Chromium: the factory returns a working `IndexedDBDatabaseInterface` — it
@@ -15,7 +15,7 @@ afterEach(teardown.destroy)
 
 describe('createIndexedDBDatabase', () => {
 	it('returns a connecting, round-tripping database over its schema', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const db = createIndexedDBDatabase({
 			name,
@@ -45,7 +45,7 @@ describe('createIndexedDBDatabase', () => {
 	})
 
 	it('opens in auto-managed mode when no version is given', async () => {
-		const name = uniqueName()
+		const name = mintDatabase()
 		await dropDatabase(name)
 		const db = createIndexedDBDatabase({ name, stores: { items: { path: 'id' } } })
 		teardown.add(async () => {
