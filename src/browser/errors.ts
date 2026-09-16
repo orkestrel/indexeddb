@@ -7,6 +7,7 @@
 // (`.claude/rules/typescript.md` § Errors and outcomes).
 
 import type { IndexedDBErrorCode } from './types.js'
+import { isInstance } from '@orkestrel/contract'
 
 /**
  * Represents an error thrown by the IndexedDB wrapper, carrying a machine-readable
@@ -58,5 +59,5 @@ export class IndexedDBError extends Error {
  * @returns True if `value` is an `IndexedDBError`; false otherwise
  */
 export function isIndexedDBError(value: unknown): value is IndexedDBError {
-	return value instanceof IndexedDBError
+	return isInstance(value, IndexedDBError)
 }

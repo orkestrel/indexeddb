@@ -1,5 +1,5 @@
 import type { IndexDefinition, Row } from './types.js'
-import { isRecord } from '@orkestrel/contract'
+import { isRecord, isString } from '@orkestrel/contract'
 import { ERROR_CODES } from './constants.js'
 import { IndexedDBError } from './errors.js'
 
@@ -191,7 +191,7 @@ export async function hasKey(
  * @param definition - The index to create
  */
 export function createIndex(store: IDBObjectStore, definition: IndexDefinition): void {
-	const keyPath = typeof definition.path === 'string' ? definition.path : [...definition.path]
+	const keyPath = isString(definition.path) ? definition.path : [...definition.path]
 	store.createIndex(definition.name, keyPath, {
 		unique: definition.unique ?? false,
 		multiEntry: definition.multiple ?? false,

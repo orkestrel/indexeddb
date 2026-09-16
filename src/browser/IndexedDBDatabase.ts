@@ -8,7 +8,7 @@ import type {
 	IndexDefinition,
 	StoreDefinition,
 } from './types.js'
-import { isArray } from '@orkestrel/contract'
+import { isArray, isInteger, isString } from '@orkestrel/contract'
 import { IndexedDBError } from './errors.js'
 import { createIndex, promisifyTransaction, wrapCall } from './helpers.js'
 import { IndexedDBStore } from './IndexedDBStore.js'
@@ -60,10 +60,7 @@ export class IndexedDBDatabase<
 		if (options.name.length === 0) {
 			throw new IndexedDBError('OPEN', 'Database name must be a non-empty string')
 		}
-		if (
-			options.version !== undefined &&
-			(!Number.isInteger(options.version) || options.version < 1)
-		) {
+		if (options.version !== undefined && (!isInteger(options.version) || options.version < 1)) {
 			throw new IndexedDBError(
 				'OPEN',
 				`Database version must be a positive integer, got ${String(options.version)}`,
@@ -384,7 +381,7 @@ export class IndexedDBDatabase<
 	#createStore(database: IDBDatabase, name: string, definition: StoreDefinition): void {
 		const options: IDBObjectStoreParameters = { autoIncrement: definition.increment ?? false }
 		if (definition.path !== undefined) {
-			options.keyPath = typeof definition.path === 'string' ? definition.path : [...definition.path]
+			options.keyPath = isString(definition.path) ? definition.path : [...definition.path]
 		}
 		const store = database.createObjectStore(name, options)
 		for (const index of definition.indexes ?? []) {
