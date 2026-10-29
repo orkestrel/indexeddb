@@ -1,3 +1,4 @@
+import type { IndexedDBCursorInterface } from '@src/browser'
 import { IndexedDBError, promisifyRequest, rangeFromKey } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createTeardown, requireValue } from '@orkestrel/test'
@@ -21,6 +22,14 @@ afterEach(teardown.destroy)
 // each call adds its cleanup to this file's
 // `teardown` list.
 const seed = (): ReturnType<typeof seedStore> => seedStore(teardown)
+
+async function updateCursor(cursor: IndexedDBCursorInterface | null): Promise<void> {
+	if (cursor === null) return
+	const row = requireValue(cursor.value, 'cursor value')
+	if (row.id === 'b') await cursor.remove()
+	else await cursor.update({ ...row, n: Number(row.n) * 10 })
+	await updateCursor(await cursor.continue())
+}
 
 describe('IndexedDBCursor — position snapshot', () => {
 	it('snapshots key / primary / value / direction / source at the current record', async () => {
@@ -50,12 +59,8 @@ describe('IndexedDBCursor — position snapshot', () => {
 describe('IndexedDBCursor — moves', () => {
 	it('continue advances one record at a time, then null at the end', async () => {
 		const db = await seed()
-		let cursor = await db.store('users').cursor()
-		const visited: string[] = []
-		while (cursor) {
-			visited.push(String(cursor.value?.id))
-			cursor = await cursor.continue()
-		}
+		const cursors = await drainCursor(await db.store('users').cursor())
+		const visited = cursors.map((cursor) => String(cursor.value?.id))
 		expect(visited).toEqual(['a', 'b', 'c'])
 	})
 
@@ -118,13 +123,7 @@ describe('IndexedDBCursor — moves', () => {
 describe('IndexedDBCursor — in-place mutation', () => {
 	it('updates and removes the record at the current position', async () => {
 		const db = await seed()
-		let cursor = await db.store('users').cursor()
-		while (cursor) {
-			const row = requireValue(cursor.value, 'cursor value')
-			if (row.id === 'b') await cursor.remove()
-			else await cursor.update({ ...row, n: Number(row.n) * 10 })
-			cursor = await cursor.continue()
-		}
+		await updateCursor(await db.store('users').cursor())
 		const users = db.store('users')
 		expect(await users.get('a')).toEqual({ id: 'a', n: 10 })
 		expect(await users.get('b')).toBeUndefined()

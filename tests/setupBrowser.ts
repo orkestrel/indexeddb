@@ -67,7 +67,15 @@ export async function dropDatabase(name: string): Promise<void> {
 	})
 }
 
-let databaseCounter = 0
+class DatabaseSequence {
+	#count = 0
+
+	next(): number {
+		return ++this.#count
+	}
+}
+
+const DATABASE_SEQUENCE = new DatabaseSequence()
 
 /**
  * Builds a process-unique IndexedDB database name from a monotonic counter
@@ -77,8 +85,7 @@ let databaseCounter = 0
  * @returns A name no earlier call has returned
  */
 export function mintDatabase(prefix = 'terrain-idb'): string {
-	databaseCounter += 1
-	return `${prefix}-${databaseCounter}`
+	return `${prefix}-${DATABASE_SEQUENCE.next()}`
 }
 
 /** Represents a connected test database plus the boilerplate to identify and dispose it. */
@@ -154,13 +161,13 @@ export async function createTestDatabase<const Stores extends IndexedDBSchema>(
 export async function drainCursor(
 	first: IndexedDBCursorInterface | null,
 ): Promise<readonly IndexedDBCursorInterface[]> {
-	const seen: IndexedDBCursorInterface[] = []
-	let cursor = first
-	while (cursor) {
-		seen.push(cursor)
-		cursor = await cursor.continue()
+	const seen = [first]
+	while (true) {
+		const cursor = seen.at(-1)
+		if (!cursor) break
+		seen.push(await cursor.continue())
 	}
-	return seen
+	return seen.filter((cursor) => cursor !== null)
 }
 
 /**

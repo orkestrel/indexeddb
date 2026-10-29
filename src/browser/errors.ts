@@ -7,7 +7,7 @@
 // (`.claude/rules/typescript.md` § Errors and outcomes).
 
 import type { IndexedDBErrorCode } from './types.js'
-import { isInstance } from '@orkestrel/contract'
+import { holds, INTRINSICS, isRecord } from '@orkestrel/contract'
 
 /**
  * Represents an error thrown by the IndexedDB wrapper, carrying a machine-readable
@@ -46,6 +46,7 @@ export class IndexedDBError extends Error {
 		context?: Readonly<Record<string, unknown>>,
 	) {
 		super(message, { cause })
+		INTRINSICS.define(this, Symbol.for('@orkestrel/indexeddb.IndexedDBError'), { value: this })
 		this.name = 'IndexedDBError'
 		this.code = code
 		this.context = context
@@ -55,9 +56,40 @@ export class IndexedDBError extends Error {
 /**
  * Checks whether a value is an {@link IndexedDBError}.
  *
+ * @remarks
+ * Recognizes the identity brand, code, and context across package copies and
+ * subclasses. Refuses transparent proxies and unbranded look-alikes.
+ *
  * @param value - The value to test
  * @returns True if `value` is an `IndexedDBError`; false otherwise
  */
 export function isIndexedDBError(value: unknown): value is IndexedDBError {
-	return isInstance(value, IndexedDBError)
+	return holds(() => {
+		if (!(value instanceof Error) || INTRINSICS.prototype(value) === Error.prototype) return false
+		if (
+			INTRINSICS.describe(value, Symbol.for('@orkestrel/indexeddb.IndexedDBError'))?.value !== value
+		)
+			return false
+		const code: unknown = INTRINSICS.reflect.read(value, 'code')
+		if (
+			![
+				'NOT_OPEN',
+				'CLOSED',
+				'NOT_FOUND',
+				'CONSTRAINT',
+				'QUOTA',
+				'ABORTED',
+				'DATA',
+				'OPEN',
+				'UPGRADE',
+				'INACTIVE',
+				'READONLY',
+				'INVALID',
+				'UNKNOWN',
+			].some((candidate) => candidate === code)
+		)
+			return false
+		const context: unknown = INTRINSICS.reflect.read(value, 'context')
+		return context === undefined || isRecord(context)
+	})
 }

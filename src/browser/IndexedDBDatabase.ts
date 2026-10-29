@@ -8,7 +8,7 @@ import type {
 	IndexDefinition,
 	StoreDefinition,
 } from './types.js'
-import { isArray, isInteger, isString } from '@orkestrel/contract'
+import { isArray, isInteger, isRecord, isString } from '@orkestrel/contract'
 import { IndexedDBError } from './errors.js'
 import { createIndex, promisifyTransaction, wrapCall } from './helpers.js'
 import { IndexedDBStore } from './IndexedDBStore.js'
@@ -53,7 +53,7 @@ export class IndexedDBDatabase<
 	readonly #stores: Stores
 	readonly #upgrade: ((context: IndexedDBUpgradeContext) => void | Promise<void>) | undefined
 	#database: IDBDatabase | undefined
-	#opening: Promise<IDBDatabase> | undefined
+	readonly #opens = new Set<Promise<IDBDatabase>>()
 	#closed = false
 
 	constructor(options: IndexedDBDatabaseOptions<Stores>) {
@@ -104,13 +104,15 @@ export class IndexedDBDatabase<
 			throw new IndexedDBError('CLOSED', `Database '${this.#name}' has been closed`)
 		}
 		if (this.#database !== undefined) return Promise.resolve(this.#database)
-		if (this.#opening !== undefined) return this.#opening
-		// Clear the latch on failure so a later call can retry the open.
-		this.#opening = this.#open().catch((error: unknown) => {
-			this.#opening = undefined
-			throw error
-		})
-		return this.#opening
+		const [opening] = this.#opens
+		if (opening !== undefined) return opening
+		const pending = this.#open()
+		this.#opens.add(pending)
+		void pending.then(
+			() => this.#opens.delete(pending),
+			() => this.#opens.delete(pending),
+		)
+		return pending
 	}
 
 	store<K extends keyof Stores & string>(name: K): IndexedDBStoreInterface {
@@ -143,7 +145,7 @@ export class IndexedDBDatabase<
 	close(): void {
 		this.#database?.close()
 		this.#database = undefined
-		this.#opening = undefined
+		this.#opens.clear()
 		this.#closed = true
 	}
 
@@ -199,31 +201,23 @@ export class IndexedDBDatabase<
 	// version) — at the database's current version, bumping once to create any
 	// declared store the stored schema is missing.
 	async #open(): Promise<IDBDatabase> {
-		let database = this.#accept(await this.#request(this.#version))
-		if (this.#version === undefined) {
-			const missing = this.#missing(database)
-			if (missing.length > 0) {
-				const next = database.version + 1
-				database.close()
-				database = this.#accept(await this.#request(next))
-			}
-		}
-		// An abnormal, browser-initiated close (a crashed extension, storage
-		// eviction) fires this event — clear BOTH latches, mirroring
-		// the `onversionchange` handler, so a later operation lazily reconnects instead
-		// of finding a stale resolved `#opening` for a connection that is now dead.
+		const initial = this.#accept(await this.#request(this.#version))
+		const database =
+			this.#version === undefined && this.#missing(initial).length > 0
+				? await this.#replace(initial)
+				: initial
+		// Browser-initiated closure retires the stored connection so a later call reconnects.
 		database.onclose = this.#clearConnection.bind(this, database)
-		// Yield to another context's version-change upgrade instead of blocking it
-		// indefinitely — without this, two tabs over the same database hang: the
-		// second tab's `open` sits in `onblocked` forever because this connection
-		// never closes on its own. `close()` here is self-initiated, so `onclose`
-		// does NOT fire (the browser only fires it when the connection closes for a
-		// reason other than `close()` itself) — clear the same latches `onclose`
-		// clears so a later operation on this handle lazily reconnects instead of
-		// forever holding a closed `#database`.
+		// Self-initiated closure emits no close event, so versionchange also retires the connection.
 		database.onversionchange = this.#yieldConnection.bind(this, database)
 		this.#database = database
 		return database
+	}
+
+	async #replace(database: IDBDatabase): Promise<IDBDatabase> {
+		const next = database.version + 1
+		database.close()
+		return this.#accept(await this.#request(next))
 	}
 
 	#accept(database: IDBDatabase): IDBDatabase {
@@ -239,7 +233,7 @@ export class IndexedDBDatabase<
 		return new Promise((resolve, reject) => {
 			// Presence is separate from the cause value because JavaScript permits
 			// both `throw undefined` and `Promise.reject(undefined)`.
-			let upgradeFailure: { readonly cause: unknown } | undefined
+			const failure = new AbortController()
 			const request =
 				version === undefined
 					? globalThis.indexedDB.open(this.#name)
@@ -248,12 +242,12 @@ export class IndexedDBDatabase<
 				const database = request.result
 				const transaction = request.transaction
 				if (transaction === null) {
-					upgradeFailure = {
+					failure.abort({
 						cause: new IndexedDBError(
 							'UPGRADE',
 							`Upgrade of '${this.#name}' has no versionchange transaction`,
 						),
-					}
+					})
 					return
 				}
 
@@ -270,7 +264,7 @@ export class IndexedDBDatabase<
 						const result = this.#upgrade(this.#context(database, transaction, event))
 						if (result !== undefined) {
 							result.catch((error: unknown) => {
-								if (upgradeFailure === undefined) upgradeFailure = { cause: error }
+								failure.abort({ cause: error })
 								try {
 									transaction.abort()
 								} catch {
@@ -281,7 +275,7 @@ export class IndexedDBDatabase<
 						}
 					}
 				} catch (error) {
-					if (upgradeFailure === undefined) upgradeFailure = { cause: error }
+					failure.abort({ cause: error })
 					try {
 						transaction.abort()
 					} catch {
@@ -291,26 +285,32 @@ export class IndexedDBDatabase<
 				}
 			})
 			request.addEventListener('success', () => {
-				if (upgradeFailure === undefined) {
+				if (!failure.signal.aborted) {
 					resolve(request.result)
 					return
 				}
 				request.result.close()
+				const reason: unknown = failure.signal.reason
 				reject(
-					new IndexedDBError('UPGRADE', `Upgrade of '${this.#name}' failed`, upgradeFailure.cause),
+					new IndexedDBError(
+						'UPGRADE',
+						`Upgrade of '${this.#name}' failed`,
+						isRecord(reason) ? reason.cause : undefined,
+					),
 				)
 			})
-			request.addEventListener('error', () =>
+			request.addEventListener('error', () => {
+				const reason: unknown = failure.signal.reason
 				reject(
-					upgradeFailure !== undefined
+					failure.signal.aborted
 						? new IndexedDBError(
 								'UPGRADE',
 								`Upgrade of '${this.#name}' failed`,
-								upgradeFailure.cause,
+								isRecord(reason) ? reason.cause : undefined,
 							)
 						: new IndexedDBError('OPEN', `Failed to open database '${this.#name}'`, request.error),
-				),
-			)
+				)
+			})
 		})
 	}
 
@@ -346,7 +346,6 @@ export class IndexedDBDatabase<
 	#clearConnection(database: IDBDatabase): void {
 		if (this.#database !== database) return
 		this.#database = undefined
-		this.#opening = undefined
 	}
 
 	#yieldConnection(database: IDBDatabase): void {

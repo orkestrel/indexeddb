@@ -63,19 +63,19 @@ describe('IndexedDBTransaction — scoped store access', () => {
 		// Abort, then capture the fault from reaching a store on the dead transaction.
 		// The aborted scope rejects, so the write is caught; the captured error is
 		// asserted unconditionally afterwards (no conditional expect).
-		let caught: unknown
+		const caught = Promise.withResolvers<unknown>()
 		await db
 			.write('users', (transaction) => {
 				transaction.abort()
 				try {
 					transaction.store('users') // no longer active
 				} catch (error) {
-					caught = error
+					caught.resolve(error)
 				}
 			})
 			.catch(() => {})
-		expect(caught).toBeInstanceOf(IndexedDBError)
-		expect(errorCode(caught)).toBe('ABORTED')
+		expect(await caught.promise).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(await caught.promise)).toBe('ABORTED')
 	})
 })
 
@@ -86,23 +86,23 @@ describe('IndexedDBTransaction — abort', () => {
 		await db.store('users').set({ id: 'u1', n: 1 })
 		// Capture the transaction and its post-abort state; assert unconditionally
 		// after the (rejected, caught) scope settles.
-		let captured: IndexedDBTransactionInterface | undefined
-		let activeAfterAbort = true
-		let finishedAfterAbort = false
+		const captured = Promise.withResolvers<IndexedDBTransactionInterface | undefined>()
+		const activeAfterAbort = Promise.withResolvers<boolean>()
+		const finishedAfterAbort = Promise.withResolvers<boolean>()
 		await db
 			.write('users', async (transaction) => {
-				captured = transaction
+				captured.resolve(transaction)
 				await transaction.store('users').set({ id: 'u1', n: 2 })
 				await transaction.store('users').set({ id: 'u2', n: 9 })
 				transaction.abort()
-				activeAfterAbort = transaction.active
-				finishedAfterAbort = transaction.finished
+				activeAfterAbort.resolve(transaction.active)
+				finishedAfterAbort.resolve(transaction.finished)
 			})
 			.catch(() => {})
 		// `abort` flips the state synchronously, and it survives on the reference.
-		expect(activeAfterAbort).toBe(false)
-		expect(finishedAfterAbort).toBe(true)
-		expect(captured?.finished).toBe(true)
+		expect(await activeAfterAbort.promise).toBe(false)
+		expect(await finishedAfterAbort.promise).toBe(true)
+		expect((await captured.promise)?.finished).toBe(true)
 		// Neither write survived the rollback.
 		expect(await db.store('users').get('u1')).toEqual({ id: 'u1', n: 1 })
 		expect(await db.store('users').get('u2')).toBeUndefined()
@@ -111,19 +111,19 @@ describe('IndexedDBTransaction — abort', () => {
 	it('throws INACTIVE when aborting an already-finished transaction', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
-		let caught: unknown
+		const caught = Promise.withResolvers<unknown>()
 		await db
 			.write('users', (transaction) => {
 				transaction.abort()
 				try {
 					transaction.abort() // already finished
 				} catch (error) {
-					caught = error
+					caught.resolve(error)
 				}
 			})
 			.catch(() => {})
-		expect(caught).toBeInstanceOf(IndexedDBError)
-		expect(errorCode(caught)).toBe('INACTIVE')
+		expect(await caught.promise).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(await caught.promise)).toBe('INACTIVE')
 	})
 })
 
@@ -144,41 +144,41 @@ describe('IndexedDBTransaction — commit', () => {
 		// `commit` is one of the two terminating transitions, so it writes the same
 		// settled fact `abort` writes. Read the state synchronously after the call,
 		// before the native `complete` event has had a turn to settle it instead.
-		let activeAfterCommit = true
-		let finishedAfterCommit = false
-		let caught: unknown
+		const activeAfterCommit = Promise.withResolvers<boolean>()
+		const finishedAfterCommit = Promise.withResolvers<boolean>()
+		const caught = Promise.withResolvers<unknown>()
 		await db.write('users', async (transaction) => {
 			await transaction.store('users').set({ id: 'u1', name: 'Ada' })
 			transaction.commit()
-			activeAfterCommit = transaction.active
-			finishedAfterCommit = transaction.finished
+			activeAfterCommit.resolve(transaction.active)
+			finishedAfterCommit.resolve(transaction.finished)
 			try {
 				transaction.commit() // already finished
 			} catch (error) {
-				caught = error
+				caught.resolve(error)
 			}
 		})
-		expect(finishedAfterCommit).toBe(true)
-		expect(activeAfterCommit).toBe(false)
-		expect(caught).toBeInstanceOf(IndexedDBError)
-		expect(errorCode(caught)).toBe('INACTIVE')
+		expect(await finishedAfterCommit.promise).toBe(true)
+		expect(await activeAfterCommit.promise).toBe(false)
+		expect(await caught.promise).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(await caught.promise)).toBe('INACTIVE')
 	})
 
 	it('throws INACTIVE when committing an already-finished transaction', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
-		let caught: unknown
+		const caught = Promise.withResolvers<unknown>()
 		await db
 			.write('users', (transaction) => {
 				transaction.abort()
 				try {
 					transaction.commit() // already finished
 				} catch (error) {
-					caught = error
+					caught.resolve(error)
 				}
 			})
 			.catch(() => {})
-		expect(caught).toBeInstanceOf(IndexedDBError)
-		expect(errorCode(caught)).toBe('INACTIVE')
+		expect(await caught.promise).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(await caught.promise)).toBe('INACTIVE')
 	})
 })

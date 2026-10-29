@@ -55,6 +55,10 @@ await users.index('byAge').records(rangeFromKey(18)) // adults, index-backed (O(
 
 ### Helpers and errors
 
+`isIndexedDBError` recognizes the error's own identity brand, declared code, and
+context across package copies. Subclass instances pass without an exact name;
+transparent proxies, unbranded look-alikes, and plain branded objects fail.
+
 | API                    | Kind     | Summary                                                                                                                                    |
 | ---------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `supportsIndexedDB`    | function | Checks whether IndexedDB is available in this environment.                                                                                 |

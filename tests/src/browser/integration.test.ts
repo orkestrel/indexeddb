@@ -1,3 +1,4 @@
+import type { IndexedDBCursorInterface } from '@src/browser'
 import {
 	createIndexedDBDatabase,
 	hasKey,
@@ -33,6 +34,12 @@ import { createDatabaseCleanup, createTestDatabase } from '../../setupBrowser.js
 const teardown = createTeardown()
 
 afterEach(teardown.destroy)
+
+async function removeInactive(cursor: IndexedDBCursorInterface | null): Promise<void> {
+	if (cursor === null) return
+	if (cursor.value?.active === false) await cursor.remove()
+	await removeInactive(await cursor.continue())
+}
 
 describe('guides/indexeddb.md — the Surface fence', () => {
 	it('reads back the row it wrote, batches an array in to keys out, and reads adults off the index', async () => {
@@ -131,11 +138,7 @@ describe('guides/indexeddb.md — Cursor streaming and in-place mutation', () =>
 			{ id: 'c', active: true },
 		])
 
-		let cursor = await db.store('users').cursor()
-		while (cursor) {
-			if (cursor.value?.active === false) await cursor.remove()
-			cursor = await cursor.continue()
-		}
+		await removeInactive(await db.store('users').cursor())
 
 		expect(await db.store('users').keys()).toEqual(['a', 'c'])
 	})
@@ -153,9 +156,9 @@ describe('guides/indexeddb.md — Seeking an index cursor to one primary key', (
 			{ id: 'c', age: 30 },
 		])
 
-		let cursor = await db.store('users').index('byAge').cursor()
-		expect(cursor?.primary).toBe('a')
-		if (cursor) cursor = await cursor.seek(30, 'c')
+		const first = await db.store('users').index('byAge').cursor()
+		expect(first?.primary).toBe('a')
+		const cursor = first ? await first.seek(30, 'c') : first
 		expect(cursor?.primary).toBe('c')
 	})
 })
@@ -167,8 +170,8 @@ describe('guides/indexeddb.md — Explicit transaction control and cursor moveme
 		await db.store('users').set([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
 
 		await db.write('users', async (transaction) => {
-			let cursor = await transaction.store('users').cursor()
-			if (cursor) cursor = await cursor.advance(1) // skip forward one record
+			const first = await transaction.store('users').cursor()
+			const cursor = first ? await first.advance(1) : first
 			if (cursor?.value) await cursor.update({ ...cursor.value, seen: true })
 			transaction.commit() // flush early instead of waiting for the scope to resolve
 		})
@@ -220,15 +223,17 @@ describe('guides/indexeddb.md — Branching on a typed fault', () => {
 		teardown.add(cleanup)
 		await db.store('users').add({ id: 'u1', name: 'Bea' })
 
-		let branch = 'no fault'
-		try {
-			await db.store('users').add({ id: 'u1', name: 'Ada' })
-		} catch (error) {
-			if (error instanceof IndexedDBError && error.code === 'CONSTRAINT') {
-				branch = 'CONSTRAINT'
-				await db.store('users').set({ id: 'u1', name: 'Ada' })
-			} else throw error
-		}
+		const branch = await db
+			.store('users')
+			.add({ id: 'u1', name: 'Ada' })
+			.then(
+				() => 'no fault',
+				async (error: unknown) => {
+					if (!(error instanceof IndexedDBError) || error.code !== 'CONSTRAINT') throw error
+					await db.store('users').set({ id: 'u1', name: 'Ada' })
+					return 'CONSTRAINT'
+				},
+			)
 
 		expect(branch).toBe('CONSTRAINT')
 		expect(await db.store('users').get('u1')).toEqual({ id: 'u1', name: 'Ada' })
@@ -240,14 +245,16 @@ describe('guides/indexeddb.md — Narrowing a caught value with isIndexedDBError
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
 
-		let branch = 'no fault'
-		try {
-			await db.store('users').resolve('ghost')
-		} catch (error) {
-			if (isIndexedDBError(error) && error.code === 'NOT_FOUND') {
-				branch = 'NOT_FOUND'
-			} else throw error
-		}
+		const branch = await db
+			.store('users')
+			.resolve('ghost')
+			.then(
+				() => 'no fault',
+				(error: unknown) => {
+					if (!isIndexedDBError(error) || error.code !== 'NOT_FOUND') throw error
+					return 'NOT_FOUND'
+				},
+			)
 
 		expect(branch).toBe('NOT_FOUND')
 	})

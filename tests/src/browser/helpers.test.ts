@@ -162,13 +162,13 @@ describe('createIndex — index-DDL leaf', () => {
 		await dropDatabase(name)
 		const opened = await new Promise<IDBDatabase>((resolve, reject) => {
 			const request = globalThis.indexedDB.open(name, 1)
-			request.onupgradeneeded = () => {
+			request.addEventListener('upgradeneeded', () => {
 				const store = request.result.createObjectStore('tags', { keyPath: 'id' })
 				createIndex(store, { name: 'byLabel', path: 'label', unique: true })
 				createIndex(store, { name: 'byWord', path: 'words', multiple: true })
-			}
-			request.onsuccess = () => resolve(request.result)
-			request.onerror = () => reject(request.error)
+			})
+			request.addEventListener('success', () => resolve(request.result))
+			request.addEventListener('error', () => reject(request.error))
 		})
 		teardown.add(async () => {
 			opened.close()
@@ -223,18 +223,20 @@ describe('promisifyRequest — IDBRequest bridge', () => {
 		const { db, cleanup } = await createTestDatabase({ store: { path: 'id' } })
 		teardown.add(cleanup)
 		await db.store('store').set({ id: 'u1' })
-		let caught: unknown
+		const caught = Promise.withResolvers<unknown>()
 		await db
 			.write('store', async (transaction) => {
 				// A duplicate `add` faults with a native ConstraintError, which the
 				// bridge wraps as an IndexedDBError(code: 'CONSTRAINT').
-				caught = await promisifyRequest(transaction.store('store').store.add({ id: 'u1' })).catch(
-					(error: unknown) => error,
+				caught.resolve(
+					await promisifyRequest(transaction.store('store').store.add({ id: 'u1' })).catch(
+						(error: unknown) => error,
+					),
 				)
 			})
 			.catch(() => {})
-		expect(caught).toBeInstanceOf(IndexedDBError)
-		expect(errorCode(caught)).toBe('CONSTRAINT')
+		expect(await caught.promise).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(await caught.promise)).toBe('CONSTRAINT')
 	})
 })
 

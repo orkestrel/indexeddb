@@ -31,20 +31,20 @@ describe('IndexedDBTransactionStore — CRUD within a scope', () => {
 	it('reads back its own uncommitted writes inside one scope', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
-		let seen: unknown
-		let present = false
-		let total = 0
+		const seen = Promise.withResolvers<unknown>()
+		const present = Promise.withResolvers<boolean>()
+		const total = Promise.withResolvers<number>()
 		await db.write('users', async (transaction) => {
 			const users = transaction.store('users')
 			await users.set({ id: 'u1', name: 'Ada' })
 			// Same transaction — the write is visible before the scope commits.
-			seen = await users.get('u1')
-			present = await users.has('u1')
-			total = await users.count()
+			seen.resolve(await users.get('u1'))
+			present.resolve(await users.has('u1'))
+			total.resolve(await users.count())
 		})
-		expect(seen).toEqual({ id: 'u1', name: 'Ada' })
-		expect(present).toBe(true)
-		expect(total).toBe(1)
+		expect(await seen.promise).toEqual({ id: 'u1', name: 'Ada' })
+		expect(await present.promise).toBe(true)
+		expect(await total.promise).toBe(1)
 		// And it committed with the scope.
 		expect(await db.store('users').get('u1')).toEqual({ id: 'u1', name: 'Ada' })
 	})
@@ -52,32 +52,36 @@ describe('IndexedDBTransactionStore — CRUD within a scope', () => {
 	it('resolve throws NOT_FOUND on a miss within the scope', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
-		let caught: unknown
+		const caught = Promise.withResolvers<unknown>()
 		await db.read('users', async (transaction) => {
-			caught = await transaction
-				.store('users')
-				.resolve('nope')
-				.catch((error: unknown) => error)
+			caught.resolve(
+				await transaction
+					.store('users')
+					.resolve('nope')
+					.catch((error: unknown) => error),
+			)
 		})
-		expect(caught).toBeInstanceOf(IndexedDBError)
-		expect(errorCode(caught)).toBe('NOT_FOUND')
+		expect(await caught.promise).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(await caught.promise)).toBe('NOT_FOUND')
 	})
 
 	it('add throws CONSTRAINT on a duplicate within the scope', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
 		await db.store('users').set({ id: 'u1' })
-		let caught: unknown
+		const caught = Promise.withResolvers<unknown>()
 		await db
 			.write('users', async (transaction) => {
-				caught = await transaction
-					.store('users')
-					.add({ id: 'u1' })
-					.catch((error: unknown) => error)
+				caught.resolve(
+					await transaction
+						.store('users')
+						.add({ id: 'u1' })
+						.catch((error: unknown) => error),
+				)
 			})
 			.catch(() => {})
-		expect(caught).toBeInstanceOf(IndexedDBError)
-		expect(errorCode(caught)).toBe('CONSTRAINT')
+		expect(await caught.promise).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(await caught.promise)).toBe('CONSTRAINT')
 	})
 
 	it('lists keys / records over a range and clears within the scope', async () => {
@@ -101,18 +105,18 @@ describe('IndexedDBTransactionStore — array-first batch overloads', () => {
 	it('batches set / get / has / remove inside the scope', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
-		let gotten: unknown
-		let presence: readonly boolean[] = []
+		const gotten = Promise.withResolvers<unknown>()
+		const presence = Promise.withResolvers<readonly boolean[]>()
 		await db.write('users', async (transaction) => {
 			const users = transaction.store('users')
 			const keys = await users.set([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
 			expect(keys).toEqual(['a', 'b', 'c'])
-			gotten = await users.get(['a', 'missing', 'c'])
-			presence = await users.has(['a', 'missing'])
+			gotten.resolve(await users.get(['a', 'missing', 'c']))
+			presence.resolve(await users.has(['a', 'missing']))
 			await users.remove(['a', 'b'])
 		})
-		expect(gotten).toEqual([{ id: 'a' }, undefined, { id: 'c' }])
-		expect(presence).toEqual([true, false])
+		expect(await gotten.promise).toEqual([{ id: 'a' }, undefined, { id: 'c' }])
+		expect(await presence.promise).toEqual([true, false])
 		expect(await db.store('users').keys()).toEqual(['c'])
 	})
 })
@@ -131,12 +135,12 @@ describe('IndexedDBTransactionStore — out-of-line keys and cursor', () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
 		await db.store('users').set([{ id: 'a' }, { id: 'b' }])
-		let ids: readonly string[] = []
+		const ids = Promise.withResolvers<readonly string[]>()
 		await db.read('users', async (transaction) => {
 			const seen = await drainCursor(await transaction.store('users').cursor())
-			ids = seen.map((cursor) => String(cursor.value?.id))
+			ids.resolve(seen.map((cursor) => String(cursor.value?.id)))
 		})
-		expect(ids).toEqual(['a', 'b'])
+		expect(await ids.promise).toEqual(['a', 'b'])
 	})
 
 	it('rolls every write in the scope back when it throws', async () => {
@@ -160,12 +164,12 @@ describe('IndexedDBTransactionStore — synchronous native faults', () => {
 	it('throws a real INACTIVE once the owning transaction auto-commits out from under it', async () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
-		let captured: IndexedDBTransactionStoreInterface | undefined
+		const captured = Promise.withResolvers<IndexedDBTransactionStoreInterface>()
 		await db.write('users', (transaction) => {
 			// Capture the transaction-bound store but issue no request on it — the
 			// scope resolves synchronously, so the owning transaction auto-commits
 			// once control returns to the event loop.
-			captured = transaction.store('users')
+			captured.resolve(transaction.store('users'))
 		})
 		// A macrotask past the scope's resolution: the transaction has committed and
 		// gone inactive. `get` issues a synchronous native `IDBObjectStore.get` on a
@@ -173,8 +177,8 @@ describe('IndexedDBTransactionStore — synchronous native faults', () => {
 		// catches that synchronous `TransactionInactiveError` and rejects with a
 		// typed `IndexedDBError`, never an unhandled throw.
 		await waitForDelay(10)
-		const caught =
-			captured === undefined ? undefined : await captured.get('u1').catch((error: unknown) => error)
+		const bound = await captured.promise
+		const caught = await bound.get('u1').catch((error: unknown) => error)
 		expect(caught).toBeInstanceOf(IndexedDBError)
 		expect(errorCode(caught)).toBe('INACTIVE')
 	})

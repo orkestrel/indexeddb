@@ -6,7 +6,7 @@ import {
 	promisifyTransaction,
 } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { captureError, createTeardown, waitForDelay } from '@orkestrel/test'
+import { captureError, createRecorder, createTeardown, waitForDelay } from '@orkestrel/test'
 import { createTestDatabase, dropDatabase, errorCode, mintDatabase } from '../../setupBrowser.js'
 
 // The `IndexedDBDatabaseInterface` surface in real Chromium: lazy connect and
@@ -91,14 +91,12 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 		const requested = new Promise<void>((resolve) => {
 			blocker.addEventListener('versionchange', () => resolve(), { once: true })
 		})
-		let upgrades = 0
+		const upgrades = createRecorder<[]>()
 		const db = createIndexedDBDatabase({
 			name,
 			version: 2,
 			stores: { users: { path: 'id' }, posts: { path: 'id' } },
-			upgrade: () => {
-				upgrades += 1
-			},
+			upgrade: () => upgrades.handler(),
 		})
 		teardown.add(async () => {
 			blocker.close()
@@ -106,26 +104,26 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 			await dropDatabase(name)
 		})
 
-		let settled = false
+		const settled = new AbortController()
 		const first = db.connect()
 		first.then(
 			() => {
-				settled = true
+				settled.abort()
 			},
 			() => {
-				settled = true
+				settled.abort()
 			},
 		)
 		const second = db.connect()
 		expect(second).toBe(first)
 		await requested
 		await waitForDelay()
-		expect(settled).toBe(false)
+		expect(settled.signal.aborted).toBe(false)
 
 		blocker.close()
 		const database = await first
 		expect(await second).toBe(database)
-		expect(upgrades).toBe(1)
+		expect(upgrades.calls).toEqual([[]])
 		expect(db.open).toBe(true)
 		expect(db.database).toBe(database)
 
@@ -150,22 +148,22 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 			await dropDatabase(name)
 		})
 
-		let settled = false
+		const settled = new AbortController()
 		const dropping = db.drop()
 		dropping.then(
 			() => {
-				settled = true
+				settled.abort()
 			},
 			() => {
-				settled = true
+				settled.abort()
 			},
 		)
 		await requested
-		expect(settled).toBe(false)
+		expect(settled.signal.aborted).toBe(false)
 		expect(
 			(await globalThis.indexedDB.databases()).some((database) => database.name === name),
 		).toBe(true)
-		expect(settled).toBe(false)
+		expect(settled.signal.aborted).toBe(false)
 
 		blocker.close()
 		await dropping
@@ -196,21 +194,21 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 			await dropDatabase(name)
 		})
 
-		let settled = false
+		const settled = new AbortController()
 		const opening = db.connect()
 		opening.then(
 			() => {
-				settled = true
+				settled.abort()
 			},
 			() => {
-				settled = true
+				settled.abort()
 			},
 		)
 		await requested
 		await waitForDelay()
-		expect(settled).toBe(false)
+		expect(settled.signal.aborted).toBe(false)
 		db.close()
-		expect(settled).toBe(false)
+		expect(settled.signal.aborted).toBe(false)
 		blocker.close()
 
 		const caught = await opening.catch((error: unknown) => error)
@@ -244,21 +242,21 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 			await dropDatabase(name)
 		})
 
-		let settled = false
+		const settled = new AbortController()
 		const opening = db.connect()
 		opening.then(
 			() => {
-				settled = true
+				settled.abort()
 			},
 			() => {
-				settled = true
+				settled.abort()
 			},
 		)
 		await requested
 		await waitForDelay()
-		expect(settled).toBe(false)
+		expect(settled.signal.aborted).toBe(false)
 		db.close()
-		expect(settled).toBe(false)
+		expect(settled.signal.aborted).toBe(false)
 		blocker.close()
 
 		const caught = await opening.catch((error: unknown) => error)
@@ -293,28 +291,28 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 			await dropDatabase(name)
 		})
 
-		let settled = false
+		const settled = new AbortController()
 		const opening = db.connect()
 		opening.then(
 			() => {
-				settled = true
+				settled.abort()
 			},
 			() => {
-				settled = true
+				settled.abort()
 			},
 		)
 		await requested
 		await waitForDelay()
-		expect(settled).toBe(false)
+		expect(settled.signal.aborted).toBe(false)
 
-		let dropped = false
+		const dropped = new AbortController()
 		const dropping = db.drop()
 		dropping.then(
 			() => {
-				dropped = true
+				dropped.abort()
 			},
 			() => {
-				dropped = true
+				dropped.abort()
 			},
 		)
 		const reconnect = captureError(() => db.connect())
@@ -322,15 +320,15 @@ describe('IndexedDBDatabase — blocked lifecycle', () => {
 		expect(errorCode(reconnect)).toBe('CLOSED')
 		await waitForDelay()
 		expect(db.open).toBe(false)
-		expect(settled).toBe(false)
-		expect(dropped).toBe(false)
+		expect(settled.signal.aborted).toBe(false)
+		expect(dropped.signal.aborted).toBe(false)
 		blocker.close()
 
 		const caught = await opening.catch((error: unknown) => error)
 		expect(caught).toBeInstanceOf(IndexedDBError)
 		expect(errorCode(caught)).toBe('CLOSED')
 		await dropping
-		expect(dropped).toBe(true)
+		expect(dropped.signal.aborted).toBe(true)
 		expect(db.open).toBe(false)
 		expect(
 			(await globalThis.indexedDB.databases()).some((database) => database.name === name),
@@ -406,11 +404,11 @@ describe('IndexedDBDatabase — read / write scopes', () => {
 		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
 		teardown.add(cleanup)
 		await db.store('users').set({ id: 'u1', name: 'Ada' })
-		let found: unknown
+		const found = Promise.withResolvers<unknown>()
 		await db.read('users', async (transaction) => {
-			found = await transaction.store('users').get('u1')
+			found.resolve(await transaction.store('users').get('u1'))
 		})
-		expect(found).toEqual({ id: 'u1', name: 'Ada' })
+		expect(await found.promise).toEqual({ id: 'u1', name: 'Ada' })
 	})
 })
 
@@ -482,7 +480,7 @@ describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 		await seed.store('users').set({ id: 'sentinel', value: 'preserved' })
 		seed.close()
 
-		let callbackCount = 0
+		const callbacks = createRecorder<[]>()
 		const failed = createIndexedDBDatabase({
 			name,
 			stores: {
@@ -495,9 +493,7 @@ describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 					],
 				},
 			},
-			upgrade: () => {
-				callbackCount += 1
-			},
+			upgrade: () => callbacks.handler(),
 		})
 		teardown.add(async () => {
 			failed.close()
@@ -521,7 +517,7 @@ describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 			expect(nativeCause).toBeInstanceOf(DOMException)
 			expect(nativeCause).toHaveProperty('name', 'ConstraintError')
 		}
-		expect(callbackCount).toBe(0)
+		expect(callbacks.calls).toEqual([])
 		expect(failed.open).toBe(false)
 
 		const valid = createIndexedDBDatabase({
@@ -901,17 +897,17 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		await v1.connect()
 		v1.close()
 
-		let seenOld: number | undefined
-		let seenVersion: number | undefined
-		let seenStores: readonly string[] | undefined
+		const seenOld = Promise.withResolvers<number>()
+		const seenVersion = Promise.withResolvers<number>()
+		const seenStores = Promise.withResolvers<readonly string[]>()
 		const v2 = createIndexedDBDatabase({
 			name,
 			version: 3,
 			stores: { users: { path: 'id' }, posts: { path: 'id' } },
 			upgrade: (context) => {
-				seenOld = context.old
-				seenVersion = context.version
-				seenStores = context.stores.names
+				seenOld.resolve(context.old)
+				seenVersion.resolve(context.version)
+				seenStores.resolve(context.stores.names)
 			},
 		})
 		teardown.add(async () => {
@@ -919,9 +915,9 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			await dropDatabase(name)
 		})
 		await v2.connect()
-		expect(seenOld).toBe(1)
-		expect(seenVersion).toBe(3)
-		expect([...(seenStores ?? [])].sort()).toEqual(['posts', 'users'])
+		expect(await seenOld.promise).toBe(1)
+		expect(await seenVersion.promise).toBe(3)
+		expect([...(await seenStores.promise)].sort()).toEqual(['posts', 'users'])
 	})
 })
 
