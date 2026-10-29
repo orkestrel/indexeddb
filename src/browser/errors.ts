@@ -7,7 +7,7 @@
 // (`.claude/rules/typescript.md` § Errors and outcomes).
 
 import type { IndexedDBErrorCode } from './types.js'
-import { holds, INTRINSICS, isRecord } from '@orkestrel/contract'
+import { holds, INTRINSICS, isFunction, isObject } from '@orkestrel/contract'
 
 /**
  * Represents an error thrown by the IndexedDB wrapper, carrying a machine-readable
@@ -90,6 +90,6 @@ export function isIndexedDBError(value: unknown): value is IndexedDBError {
 		)
 			return false
 		const context: unknown = INTRINSICS.reflect.read(value, 'context')
-		return context === undefined || isRecord(context)
+		return context === undefined || isObject(context) || isFunction(context)
 	})
 }

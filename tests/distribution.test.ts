@@ -893,6 +893,7 @@ describe('installed package consumer', () => {
 			driver,
 			`import assert from 'node:assert/strict'
 const copies = [await import(process.argv[2]), await import(process.argv[3])]
+assert.equal(new Set(copies.map((entry) => entry.IndexedDBError)).size, copies.length)
 for (const owner of copies) {
 	const error = new owner.IndexedDBError('OPEN', 'open failed', undefined, { database: 'sample' })
 	class Derived extends owner.IndexedDBError {}
