@@ -7,10 +7,12 @@ import type {
 	IndexedDBCursorInterface,
 	IndexedDBDatabaseInterface,
 	IndexedDBSchema,
+	IndexDefinition,
+	StoreDefinition,
 } from '@src/browser'
 import type { TeardownInterface } from '@orkestrel/test'
 import { createIndexedDBDatabase, IndexedDBError } from '@src/browser'
-import { waitForDelay } from '@orkestrel/test'
+import { requireValue, waitForDelay } from '@orkestrel/test'
 
 // ── IndexedDB test fixtures (real Chromium, real `indexedDB`) ────────────────
 //
@@ -248,4 +250,40 @@ export async function seedStore(
 		{ id: 'c', n: 3 },
 	])
 	return db
+}
+
+/** Reads the trailing counter segment a `mintDatabase` result carries. */
+export function readCounter(name: string): number {
+	return Number(name.slice(name.lastIndexOf('-') + 1))
+}
+
+/** Flattens a store's declared indexes into `name → [path, unique]`, defaulting `unique` to `false`. */
+export function readIndexes(
+	definition: StoreDefinition,
+): Record<string, readonly [unknown, boolean]> {
+	const declared: readonly IndexDefinition[] = definition.indexes ?? []
+	return Object.fromEntries(
+		declared.map((index) => [index.name, [index.path, index.unique === true]]),
+	)
+}
+
+/** Returns the sorted store names a schema table declares. */
+export function readStores(stores: IndexedDBSchema): readonly string[] {
+	return Object.keys(stores).sort()
+}
+
+/** Updates numbered cursor rows and removes the row keyed by b. */
+export async function updateCursor(cursor: IndexedDBCursorInterface | null): Promise<void> {
+	if (cursor === null) return
+	const row = requireValue(cursor.value, 'cursor value')
+	if (row.id === 'b') await cursor.remove()
+	else await cursor.update({ ...row, n: Number(row.n) * 10 })
+	await updateCursor(await cursor.continue())
+}
+
+/** Removes inactive rows while traversing a cursor. */
+export async function removeInactive(cursor: IndexedDBCursorInterface | null): Promise<void> {
+	if (cursor === null) return
+	if (cursor.value?.active === false) await cursor.remove()
+	await removeInactive(await cursor.continue())
 }

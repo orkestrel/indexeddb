@@ -19,11 +19,9 @@ afterEach(teardown.destroy)
 // `setupBrowser.ts` (`.claude/rules/tests.md` § Shared test infrastructure);
 // each call adds its cleanup to this file's
 // `teardown` list.
-const seed = (): ReturnType<typeof seedUsers> => seedUsers(teardown)
-
 describe('IndexedDBIndex — metadata', () => {
 	it('reports its declared name, path, and flags', async () => {
-		const db = await seed()
+		const db = await seedUsers(teardown)
 		const byAge = db.store('users').index('byAge')
 		expect(byAge.name).toBe('byAge')
 		expect(byAge.path).toBe('age')
@@ -37,7 +35,7 @@ describe('IndexedDBIndex — metadata', () => {
 
 describe('IndexedDBIndex — reads by index key', () => {
 	it('get returns the first record for an index key; a miss is undefined', async () => {
-		const db = await seed()
+		const db = await seedUsers(teardown)
 		const byAge = db.store('users').index('byAge')
 		expect(await byAge.get(30)).toEqual({
 			id: 'b',
@@ -50,7 +48,7 @@ describe('IndexedDBIndex — reads by index key', () => {
 	})
 
 	it('resolve throws NOT_FOUND on a miss', async () => {
-		const db = await seed()
+		const db = await seedUsers(teardown)
 		const byAge = db.store('users').index('byAge')
 		expect(await byAge.resolve(40)).toEqual({
 			id: 'c',
@@ -63,14 +61,14 @@ describe('IndexedDBIndex — reads by index key', () => {
 	})
 
 	it('primary maps an index key to one primary key', async () => {
-		const db = await seed()
+		const db = await seedUsers(teardown)
 		const byEmail = db.store('users').index('byEmail')
 		expect(await byEmail.primary('c@x.io')).toBe('c')
 		expect(await byEmail.primary('nope@x.io')).toBeUndefined()
 	})
 
 	it('batches get / has / resolve by the array overload', async () => {
-		const db = await seed()
+		const db = await seedUsers(teardown)
 		const byAge = db.store('users').index('byAge')
 		expect((await byAge.get([20, 99, 40])).map((row) => row?.id)).toEqual(['a', undefined, 'c'])
 		expect(await byAge.has([20, 99])).toEqual([true, false])
@@ -80,7 +78,7 @@ describe('IndexedDBIndex — reads by index key', () => {
 
 describe('IndexedDBIndex — key ranges', () => {
 	it('reads matching records over a key range, in index order', async () => {
-		const db = await seed()
+		const db = await seedUsers(teardown)
 		const byAge = db.store('users').index('byAge')
 		expect((await byAge.records(rangeFromKey(30))).map((row) => row.id)).toEqual(['b', 'c'])
 		expect((await byAge.records(IDBKeyRange.bound(25, 45))).map((row) => row.id)).toEqual([
@@ -92,7 +90,7 @@ describe('IndexedDBIndex — key ranges', () => {
 	})
 
 	it('keys returns the matching records PRIMARY keys, not the index keys', async () => {
-		const db = await seed()
+		const db = await seedUsers(teardown)
 		const byAge = db.store('users').index('byAge')
 		// Index keys are ages; `keys` yields the primary keys of the matches in
 		// index order — proving the index → primary mapping, not the index values.
@@ -145,7 +143,7 @@ describe('IndexedDBIndex — multiEntry (multiple)', () => {
 
 describe('IndexedDBIndex — cursor', () => {
 	it('streams matches in index order, and null over no matches', async () => {
-		const db = await seed()
+		const db = await seedUsers(teardown)
 		const byAge = db.store('users').index('byAge')
 		const seen = await drainCursor(await byAge.cursor())
 		// Cursor walks in index (age) order — here it matches id order, but the

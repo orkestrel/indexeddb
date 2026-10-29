@@ -1,8 +1,13 @@
-import type { IndexedDBCursorInterface } from '@src/browser'
 import { IndexedDBError, promisifyRequest, rangeFromKey } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createTeardown, requireValue } from '@orkestrel/test'
-import { createTestDatabase, drainCursor, errorCode, seedStore } from '../../setupBrowser.js'
+import { createTeardown } from '@orkestrel/test'
+import {
+	createTestDatabase,
+	drainCursor,
+	errorCode,
+	seedStore,
+	updateCursor,
+} from '../../setupBrowser.js'
 
 // `IndexedDBCursorInterface` in real Chromium, obtained from a store or index
 // cursor: the position snapshot (`cursor` / `source` / `key` / `primary` /
@@ -21,19 +26,9 @@ afterEach(teardown.destroy)
 // `setupBrowser.ts` (`.claude/rules/tests.md` § Shared test infrastructure);
 // each call adds its cleanup to this file's
 // `teardown` list.
-const seed = (): ReturnType<typeof seedStore> => seedStore(teardown)
-
-async function updateCursor(cursor: IndexedDBCursorInterface | null): Promise<void> {
-	if (cursor === null) return
-	const row = requireValue(cursor.value, 'cursor value')
-	if (row.id === 'b') await cursor.remove()
-	else await cursor.update({ ...row, n: Number(row.n) * 10 })
-	await updateCursor(await cursor.continue())
-}
-
 describe('IndexedDBCursor — position snapshot', () => {
 	it('snapshots key / primary / value / direction / source at the current record', async () => {
-		const db = await seed()
+		const db = await seedStore(teardown)
 		const cursor = await db.store('users').cursor()
 		expect(cursor).not.toBeNull()
 		if (!cursor) return
@@ -46,7 +41,7 @@ describe('IndexedDBCursor — position snapshot', () => {
 	})
 
 	it('opens in reverse with the prev direction', async () => {
-		const db = await seed()
+		const db = await seedStore(teardown)
 		const cursor = await db.store('users').cursor({ direction: 'prev' })
 		expect(cursor).not.toBeNull()
 		if (!cursor) return
@@ -58,14 +53,14 @@ describe('IndexedDBCursor — position snapshot', () => {
 
 describe('IndexedDBCursor — moves', () => {
 	it('continue advances one record at a time, then null at the end', async () => {
-		const db = await seed()
+		const db = await seedStore(teardown)
 		const cursors = await drainCursor(await db.store('users').cursor())
 		const visited = cursors.map((cursor) => String(cursor.value?.id))
 		expect(visited).toEqual(['a', 'b', 'c'])
 	})
 
 	it('continue(key) skips ahead to a given key', async () => {
-		const db = await seed()
+		const db = await seedStore(teardown)
 		const first = await db.store('users').cursor()
 		expect(first).not.toBeNull()
 		if (!first) return
@@ -75,7 +70,7 @@ describe('IndexedDBCursor — moves', () => {
 	})
 
 	it('advance(count) skips forward by count records', async () => {
-		const db = await seed()
+		const db = await seedStore(teardown)
 		const first = await db.store('users').cursor()
 		expect(first).not.toBeNull()
 		if (!first) return
@@ -110,7 +105,7 @@ describe('IndexedDBCursor — moves', () => {
 		// publish the code a consumer catches here, so this case drives the move
 		// and reads what Chromium actually produces rather than what the
 		// specification implies.
-		const db = await seed()
+		const db = await seedStore(teardown)
 		const cursor = await db.store('users').cursor()
 		expect(cursor).not.toBeNull()
 		if (!cursor) return
@@ -122,7 +117,7 @@ describe('IndexedDBCursor — moves', () => {
 
 describe('IndexedDBCursor — in-place mutation', () => {
 	it('updates and removes the record at the current position', async () => {
-		const db = await seed()
+		const db = await seedStore(teardown)
 		await updateCursor(await db.store('users').cursor())
 		const users = db.store('users')
 		expect(await users.get('a')).toEqual({ id: 'a', n: 10 })
@@ -131,7 +126,7 @@ describe('IndexedDBCursor — in-place mutation', () => {
 	})
 
 	it('update returns the key and refreshes the cursor value', async () => {
-		const db = await seed()
+		const db = await seedStore(teardown)
 		const cursor = await db.store('users').cursor()
 		expect(cursor).not.toBeNull()
 		if (!cursor) return
@@ -177,7 +172,7 @@ describe('IndexedDBCursor — in-place mutation', () => {
 
 describe('IndexedDBCursor — ranges', () => {
 	it('honours the cursor query range', async () => {
-		const db = await seed()
+		const db = await seedStore(teardown)
 		const seen = await drainCursor(await db.store('users').cursor({ query: rangeFromKey('b') }))
 		expect(seen.map((step) => step.value?.id)).toEqual(['b', 'c'])
 	})

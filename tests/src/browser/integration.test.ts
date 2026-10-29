@@ -1,4 +1,3 @@
-import type { IndexedDBCursorInterface } from '@src/browser'
 import {
 	createIndexedDBDatabase,
 	hasKey,
@@ -18,7 +17,7 @@ import {
 } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createTeardown } from '@orkestrel/test'
-import { createDatabaseCleanup, createTestDatabase } from '../../setupBrowser.js'
+import { createDatabaseCleanup, createTestDatabase, removeInactive } from '../../setupBrowser.js'
 
 // The EXECUTED half of guides parity for `guides/indexeddb.md`. `tests/guides.test.ts` reads
 // names — from the guide's tables, from the barrel, from each fence's imports — and a name that
@@ -34,12 +33,6 @@ import { createDatabaseCleanup, createTestDatabase } from '../../setupBrowser.js
 const teardown = createTeardown()
 
 afterEach(teardown.destroy)
-
-async function removeInactive(cursor: IndexedDBCursorInterface | null): Promise<void> {
-	if (cursor === null) return
-	if (cursor.value?.active === false) await cursor.remove()
-	await removeInactive(await cursor.continue())
-}
 
 describe('guides/indexeddb.md — the Surface fence', () => {
 	it('reads back the row it wrote, batches an array in to keys out, and reads adults off the index', async () => {

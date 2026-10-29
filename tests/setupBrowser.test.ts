@@ -1,4 +1,3 @@
-import type { IndexDefinition, IndexedDBSchema, StoreDefinition } from '@src/browser'
 import { createIndexedDBDatabase, ERROR_CODES, IndexedDBError } from '@src/browser'
 import { describe, expect, it } from 'vitest'
 import {
@@ -8,6 +7,9 @@ import {
 	SEED_STORE_STORES,
 	SEED_USER_STORES,
 	mintDatabase,
+	readCounter,
+	readIndexes,
+	readStores,
 } from './setupBrowser.js'
 
 // The browser test setup module's proof (`tests/setupBrowser.ts`). Its subject is the exported
@@ -45,24 +47,6 @@ import {
 // reads. The seed tables are flattened into an index map and compared against what the
 // `IndexedDBIndex` suite reads back off a live store, so the table cannot satisfy the assertion
 // by restating itself.
-
-/** Read the trailing counter segment a `mintDatabase` result carries. */
-function readCounter(name: string): number {
-	return Number(name.slice(name.lastIndexOf('-') + 1))
-}
-
-/** Flatten a store's declared indexes into `name → [path, unique]`, defaulting `unique` to `false`. */
-function readIndexes(definition: StoreDefinition): Record<string, readonly [unknown, boolean]> {
-	const declared: readonly IndexDefinition[] = definition.indexes ?? []
-	return Object.fromEntries(
-		declared.map((index) => [index.name, [index.path, index.unique === true]]),
-	)
-}
-
-/** The store names a schema table declares, sorted. */
-function readStores(stores: IndexedDBSchema): readonly string[] {
-	return Object.keys(stores).sort()
-}
 
 describe('mintDatabase', () => {
 	it('returns a name no earlier call returned', () => {
