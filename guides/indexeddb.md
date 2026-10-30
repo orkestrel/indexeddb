@@ -38,14 +38,14 @@ await users.index('byAge').records(rangeFromKey(18)) // adults, index-backed (O(
 
 ### Database and factory
 
-| API                       | Kind     | Summary                                                                         |
+| Name                      | Kind     | Summary                                                                         |
 | ------------------------- | -------- | ------------------------------------------------------------------------------- |
 | `createIndexedDBDatabase` | function | Creates a typed, lazily-connecting IndexedDB database over a store schema.      |
 | `IndexedDBDatabase`       | class    | Represents a browser-native IndexedDB database — a typed, Promise-based handle. |
 
 ### Stores, indexes, cursors, transactions
 
-| API                         | Kind  | Summary                                                                                          |
+| Name                        | Kind  | Summary                                                                                          |
 | --------------------------- | ----- | ------------------------------------------------------------------------------------------------ |
 | `IndexedDBStore`            | class | Represents an object store — the full keyed CRUD surface plus index, count, and cursor access.   |
 | `IndexedDBIndex`            | class | Represents a secondary index on a store — a read-only view keyed by an indexed path.             |
@@ -59,7 +59,7 @@ await users.index('byAge').records(rangeFromKey(18)) // adults, index-backed (O(
 context across package copies. Subclass instances pass without an exact name;
 transparent proxies, unbranded look-alikes, and plain branded objects fail.
 
-| API                    | Kind     | Summary                                                                                                                                    |
+| Name                   | Kind     | Summary                                                                                                                                    |
 | ---------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `supportsIndexedDB`    | function | Checks whether IndexedDB is available in this environment.                                                                                 |
 | `promisifyRequest`     | function | Resolves an `IDBRequest` to its result, rejecting with an `IndexedDBError`.                                                                |
@@ -84,7 +84,7 @@ transparent proxies, unbranded look-alikes, and plain branded objects fail.
 
 A `Shape` cell holds the constant's declared type.
 
-| API           | Kind  | Shape                                          | Summary                                                               |
+| Name          | Kind  | Shape                                          | Summary                                                               |
 | ------------- | ----- | ---------------------------------------------- | --------------------------------------------------------------------- |
 | `ERROR_CODES` | const | `Readonly<Record<string, IndexedDBErrorCode>>` | Maps native `DOMException.name` → the wrapper's `IndexedDBErrorCode`. |
 
@@ -94,7 +94,7 @@ A `Shape` cell holds the constant's declared type.
 
 A `Shape` cell holds an interface's data members as bare names in braces, `?` marking an optional member and `plus` introducing its call-signature members, and a type alias's own type literal with a union's arms escaped as `\|`. An extended interface's name comes before `plus`, with the members it adds after.
 
-| API                                     | Kind      | Shape                                                                                                                                                                  | Summary                                                                                                                          |
+| Name                                    | Kind      | Shape                                                                                                                                                                  | Summary                                                                                                                          |
 | --------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `Row`                                   | type      | `Record<string, unknown>`                                                                                                                                              | Represents a record stored in, and read from, an object store.                                                                   |
 | `KeyPath`                               | type      | `string \| readonly string[]`                                                                                                                                          | Represents a key path — one field, or several for a compound key.                                                                |
