@@ -68,14 +68,14 @@
 		"test:setup:browser": "vitest run --config vite.config.ts --no-cache --reporter=dot --project setup:browser"
 	},
 	"dependencies": {
-		"@orkestrel/contract": "^0.0.20"
+		"@orkestrel/contract": "^0.0.21"
 	},
 	"devDependencies": {
 		"@microsoft/api-extractor": "^7.60.1",
 		"@orkestrel/browser": "^0.0.30",
 		"@orkestrel/guide": "^0.0.28",
 		"@orkestrel/probe": "^0.0.26",
-		"@orkestrel/scaffold": "^0.0.118",
+		"@orkestrel/scaffold": "^0.0.119",
 		"@orkestrel/test": "^0.0.31",
 		"@types/node": "^26.6.6",
 		"@vitest/browser-playwright": "^5.0.5",
