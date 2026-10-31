@@ -82,8 +82,6 @@ transparent proxies, unbranded look-alikes, and plain branded objects fail.
 
 ### Constants
 
-A `Shape` cell holds the constant's declared type.
-
 | Name          | Kind  | Signature                                      | Summary                                                               |
 | ------------- | ----- | ---------------------------------------------- | --------------------------------------------------------------------- |
 | `ERROR_CODES` | const | `Readonly<Record<string, IndexedDBErrorCode>>` | Maps native `DOMException.name` → the wrapper's `IndexedDBErrorCode`. |
@@ -91,8 +89,6 @@ A `Shape` cell holds the constant's declared type.
 `wrapDOMException` reads this frozen map at the request boundary, falling back to `UNKNOWN` for a native name it does not carry.
 
 ### Types
-
-A `Shape` cell holds an interface's data members as bare names in braces, `?` marking an optional member and `plus` introducing its call-signature members, and a type alias's own type literal with a union's arms escaped as `\|`. An extended interface's name comes before `plus`, with the members it adds after.
 
 | Name                                    | Kind      | Signature                                                                                                                                                              | Summary                                                                                                                          |
 | --------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -121,7 +117,7 @@ A database connects **lazily**: the first store operation (or an explicit `conne
 
 ## Methods
 
-The public methods of each behavioral interface — one table per type, keyed by its backticked name, every call-signature member listed. Each interface's `readonly` data members are named in the `Shape` column of the [Types](#types) table, earlier. Each class implements its interface exactly, so this doubles as the per-instance method surface (`AGENTS.md` § Documentation contract).
+The public methods of each behavioral interface — one table per type, keyed by its backticked name, every call-signature member listed. Each interface's `readonly` data members are named in the `Signature` column of the [Types](#types) table, earlier. Each class implements its interface exactly, so this doubles as the per-instance method surface (`AGENTS.md` § Documentation contract).
 
 `IndexedDBUpgradeContext` carries only readonly data, so no Methods table follows for it. Its managers carry the upgrade's schema verbs: `context.stores` is the store manager, while `IndexedDBDatabaseInterface.stores` is the plain name list.
 
