@@ -4,7 +4,7 @@ import type {
 	IndexedDBCursorOptions,
 	IndexedDBIndexInterface,
 	KeyPath,
-	Row,
+	StoreRecord,
 } from './types.js'
 import { isArray } from '@orkestrel/contract'
 import { IndexedDBError } from './errors.js'
@@ -68,11 +68,11 @@ export class IndexedDBIndex implements IndexedDBIndexInterface {
 		return this.#definition.multiple ?? false
 	}
 
-	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<Row | undefined>>
-	get(key: IDBValidKey): Promise<Row | undefined>
+	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<StoreRecord | undefined>>
+	get(key: IDBValidKey): Promise<StoreRecord | undefined>
 	async get(
 		keyOrKeys: IDBValidKey | readonly IDBValidKey[],
-	): Promise<Row | undefined | ReadonlyArray<Row | undefined>> {
+	): Promise<StoreRecord | undefined | ReadonlyArray<StoreRecord | undefined>> {
 		const index = await this.#index()
 		if (isArray<IDBValidKey>(keyOrKeys)) {
 			return Promise.all(keyOrKeys.map((key) => readRecord(index, key)))
@@ -80,9 +80,11 @@ export class IndexedDBIndex implements IndexedDBIndexInterface {
 		return readRecord(index, keyOrKeys)
 	}
 
-	resolve(keys: readonly IDBValidKey[]): Promise<readonly Row[]>
-	resolve(key: IDBValidKey): Promise<Row>
-	async resolve(keyOrKeys: IDBValidKey | readonly IDBValidKey[]): Promise<Row | readonly Row[]> {
+	resolve(keys: readonly IDBValidKey[]): Promise<readonly StoreRecord[]>
+	resolve(key: IDBValidKey): Promise<StoreRecord>
+	async resolve(
+		keyOrKeys: IDBValidKey | readonly IDBValidKey[],
+	): Promise<StoreRecord | readonly StoreRecord[]> {
 		const index = await this.#index()
 		if (isArray<IDBValidKey>(keyOrKeys)) {
 			return Promise.all(keyOrKeys.map((key) => this.#resolve(index, key)))
@@ -90,7 +92,10 @@ export class IndexedDBIndex implements IndexedDBIndexInterface {
 		return this.#resolve(index, keyOrKeys)
 	}
 
-	async records(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly Row[]> {
+	async records(
+		query?: IDBKeyRange | IDBValidKey,
+		count?: number,
+	): Promise<readonly StoreRecord[]> {
 		const index = await this.#index()
 		return readRecords(index, query, count)
 	}
@@ -137,7 +142,7 @@ export class IndexedDBIndex implements IndexedDBIndexInterface {
 		)
 	}
 
-	async #resolve(index: IDBIndex, key: IDBValidKey): Promise<Row> {
+	async #resolve(index: IDBIndex, key: IDBValidKey): Promise<StoreRecord> {
 		const value = await readRecord(index, key)
 		if (value === undefined) {
 			throw new IndexedDBError(

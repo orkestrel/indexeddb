@@ -1,4 +1,4 @@
-import type { IndexedDBCursorInterface, Row } from './types.js'
+import type { IndexedDBCursorInterface, StoreRecord } from './types.js'
 import { isRecord } from '@orkestrel/contract'
 import { promisifyRequest, wrapCall } from './helpers.js'
 
@@ -33,7 +33,7 @@ export class IndexedDBCursor implements IndexedDBCursorInterface {
 	readonly #request: IDBRequest<IDBCursorWithValue | null>
 	readonly #key: IDBValidKey
 	readonly #primary: IDBValidKey
-	#value: Row | undefined
+	#value: StoreRecord | undefined
 	readonly #direction: IDBCursorDirection
 
 	constructor(cursor: IDBCursorWithValue, request: IDBRequest<IDBCursorWithValue | null>) {
@@ -61,7 +61,7 @@ export class IndexedDBCursor implements IndexedDBCursorInterface {
 		return this.#primary
 	}
 
-	get value(): Row | undefined {
+	get value(): StoreRecord | undefined {
 		return this.#value
 	}
 
@@ -87,7 +87,7 @@ export class IndexedDBCursor implements IndexedDBCursorInterface {
 		return this.#next()
 	}
 
-	async update(value: Row): Promise<IDBValidKey> {
+	async update(value: StoreRecord): Promise<IDBValidKey> {
 		const key = await promisifyRequest(wrapCall(() => this.#cursor.update(value)))
 		this.#value = value
 		return key

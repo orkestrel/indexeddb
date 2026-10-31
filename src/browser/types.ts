@@ -6,12 +6,12 @@
 // native multi-store transactions. Types are the source of truth
 // (`AGENTS.md` § TTTDD).
 //
-// Values are this package's own `Row` (a record), narrowed from IndexedDB's
+// Values are this package's own `StoreRecord` (a record), narrowed from IndexedDB's
 // structured clone with `isRecord` at the read boundary — an `as`-free bridge.
 // Keys are the full native `IDBValidKey`, so the wrapper speaks IndexedDB's
 // whole key space.
 
-// === Row
+// === StoreRecord
 
 /**
  * Represents a record stored in, and read from, an object store.
@@ -21,7 +21,7 @@
  * writes. A structured-clone value narrowed with `isRecord` at the read
  * boundary (see `helpers.ts`), never an unchecked cast.
  */
-export type Row = Record<string, unknown>
+export type StoreRecord = Record<string, unknown>
 
 // === Errors
 
@@ -259,7 +259,7 @@ export interface IndexedDBCursorInterface {
 	readonly source: IDBObjectStore | IDBIndex
 	readonly key: IDBValidKey
 	readonly primary: IDBValidKey
-	readonly value: Row | undefined
+	readonly value: StoreRecord | undefined
 	readonly direction: IDBCursorDirection
 	/** Advances to the next record, or to the next record at or after a given key. */
 	continue(key?: IDBValidKey): Promise<IndexedDBCursorInterface | null>
@@ -281,7 +281,7 @@ export interface IndexedDBCursorInterface {
 	/** Skips forward a given number of records. */
 	advance(count: number): Promise<IndexedDBCursorInterface | null>
 	/** Overwrites the record at the current position. */
-	update(value: Row): Promise<IDBValidKey>
+	update(value: StoreRecord): Promise<IDBValidKey>
 	/** Deletes the record at the current position. */
 	remove(): Promise<void>
 }
@@ -305,13 +305,13 @@ export interface IndexedDBIndexInterface {
 	readonly unique: boolean
 	readonly multiple: boolean
 	/** Reads the first record for an index key, or `undefined` on a miss. */
-	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<Row | undefined>>
-	get(key: IDBValidKey): Promise<Row | undefined>
+	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<StoreRecord | undefined>>
+	get(key: IDBValidKey): Promise<StoreRecord | undefined>
 	/** Reads the first record for an index key, throwing `NOT_FOUND` on a miss. */
-	resolve(keys: readonly IDBValidKey[]): Promise<readonly Row[]>
-	resolve(key: IDBValidKey): Promise<Row>
+	resolve(keys: readonly IDBValidKey[]): Promise<readonly StoreRecord[]>
+	resolve(key: IDBValidKey): Promise<StoreRecord>
 	/** Reads the matching records over an optional index-key range. */
-	records(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly Row[]>
+	records(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly StoreRecord[]>
 	/** Lists the primary keys of the matching records over an optional index-key range. */
 	keys(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly IDBValidKey[]>
 	/** Reads the primary key an index key maps to, or `undefined` on a miss. */
@@ -346,13 +346,13 @@ export interface IndexedDBIndexInterface {
  */
 export interface IndexedDBRecordStoreInterface {
 	/** Reads the record at a primary key, or `undefined` on a miss. */
-	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<Row | undefined>>
-	get(key: IDBValidKey): Promise<Row | undefined>
+	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<StoreRecord | undefined>>
+	get(key: IDBValidKey): Promise<StoreRecord | undefined>
 	/** Reads the record at a primary key, throwing `NOT_FOUND` on a miss. */
-	resolve(keys: readonly IDBValidKey[]): Promise<readonly Row[]>
-	resolve(key: IDBValidKey): Promise<Row>
+	resolve(keys: readonly IDBValidKey[]): Promise<readonly StoreRecord[]>
+	resolve(key: IDBValidKey): Promise<StoreRecord>
 	/** Reads the stored records over an optional key range. */
-	records(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly Row[]>
+	records(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly StoreRecord[]>
 	/** Lists the stored primary keys over an optional key range. */
 	keys(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly IDBValidKey[]>
 	/** Checks whether a primary key is present. */
@@ -361,11 +361,11 @@ export interface IndexedDBRecordStoreInterface {
 	/** Counts the stored records within an optional key range. */
 	count(query?: IDBKeyRange | IDBValidKey): Promise<number>
 	/** Writes a record, overwriting whatever the key already holds. */
-	set(values: readonly Row[]): Promise<readonly IDBValidKey[]>
-	set(value: Row, key?: IDBValidKey): Promise<IDBValidKey>
+	set(values: readonly StoreRecord[]): Promise<readonly IDBValidKey[]>
+	set(value: StoreRecord, key?: IDBValidKey): Promise<IDBValidKey>
 	/** Writes a record, throwing `CONSTRAINT` where the key is already taken. */
-	add(values: readonly Row[]): Promise<readonly IDBValidKey[]>
-	add(value: Row, key?: IDBValidKey): Promise<IDBValidKey>
+	add(values: readonly StoreRecord[]): Promise<readonly IDBValidKey[]>
+	add(value: StoreRecord, key?: IDBValidKey): Promise<IDBValidKey>
 	/** Deletes the record at a primary key. */
 	remove(keys: readonly IDBValidKey[]): Promise<void>
 	remove(key: IDBValidKey): Promise<void>

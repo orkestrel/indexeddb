@@ -16,7 +16,7 @@ import { holds, INTRINSICS, isFunction, isObject } from '@orkestrel/contract'
  * @remarks
  * The `code` is an {@link IndexedDBErrorCode}, and the originating native error
  * rides as the standard `cause`. Construct it directly for wrapper-lifecycle
- * faults; the internal `wrapError` maps a native `DOMException` to the right code
+ * faults; the internal `wrapDOMException` maps a native `DOMException` to the right code
  * at the request boundary. Narrow a caught value with {@link isIndexedDBError},
  * this package's own guard.
  *
@@ -24,7 +24,7 @@ import { holds, INTRINSICS, isFunction, isObject } from '@orkestrel/contract'
  * key, or transaction scope the fault names — as machine-readable members beside
  * `code`, so a `catch` reads them instead of parsing the message that states the
  * same facts. It is `undefined` where the fault carries none, which is every
- * error `wrapError` builds: a native `DOMException` already rides as `cause`.
+ * error `wrapDOMException` builds: a native `DOMException` already rides as `cause`.
  *
  * @example
  * ```ts

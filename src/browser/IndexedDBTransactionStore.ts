@@ -2,7 +2,7 @@ import type {
 	IndexedDBCursorInterface,
 	IndexedDBCursorOptions,
 	IndexedDBTransactionStoreInterface,
-	Row,
+	StoreRecord,
 } from './types.js'
 import { isArray } from '@orkestrel/contract'
 import { IndexedDBError } from './errors.js'
@@ -46,27 +46,32 @@ export class IndexedDBTransactionStore implements IndexedDBTransactionStoreInter
 		return this.#store
 	}
 
-	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<Row | undefined>>
-	get(key: IDBValidKey): Promise<Row | undefined>
+	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<StoreRecord | undefined>>
+	get(key: IDBValidKey): Promise<StoreRecord | undefined>
 	async get(
 		keyOrKeys: IDBValidKey | readonly IDBValidKey[],
-	): Promise<Row | undefined | ReadonlyArray<Row | undefined>> {
+	): Promise<StoreRecord | undefined | ReadonlyArray<StoreRecord | undefined>> {
 		if (isArray<IDBValidKey>(keyOrKeys)) {
 			return Promise.all(keyOrKeys.map((key) => readRecord(this.#store, key)))
 		}
 		return readRecord(this.#store, keyOrKeys)
 	}
 
-	resolve(keys: readonly IDBValidKey[]): Promise<readonly Row[]>
-	resolve(key: IDBValidKey): Promise<Row>
-	async resolve(keyOrKeys: IDBValidKey | readonly IDBValidKey[]): Promise<Row | readonly Row[]> {
+	resolve(keys: readonly IDBValidKey[]): Promise<readonly StoreRecord[]>
+	resolve(key: IDBValidKey): Promise<StoreRecord>
+	async resolve(
+		keyOrKeys: IDBValidKey | readonly IDBValidKey[],
+	): Promise<StoreRecord | readonly StoreRecord[]> {
 		if (isArray<IDBValidKey>(keyOrKeys)) {
 			return Promise.all(keyOrKeys.map((key) => this.#resolve(key)))
 		}
 		return this.#resolve(keyOrKeys)
 	}
 
-	async records(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly Row[]> {
+	async records(
+		query?: IDBKeyRange | IDBValidKey,
+		count?: number,
+	): Promise<readonly StoreRecord[]> {
 		return readRecords(this.#store, query, count)
 	}
 
@@ -89,13 +94,13 @@ export class IndexedDBTransactionStore implements IndexedDBTransactionStoreInter
 		return promisifyRequest(wrapCall(() => this.#store.count(query)))
 	}
 
-	set(values: readonly Row[]): Promise<readonly IDBValidKey[]>
-	set(value: Row, key?: IDBValidKey): Promise<IDBValidKey>
+	set(values: readonly StoreRecord[]): Promise<readonly IDBValidKey[]>
+	set(value: StoreRecord, key?: IDBValidKey): Promise<IDBValidKey>
 	async set(
-		valueOrValues: Row | readonly Row[],
+		valueOrValues: StoreRecord | readonly StoreRecord[],
 		key?: IDBValidKey,
 	): Promise<IDBValidKey | readonly IDBValidKey[]> {
-		if (isArray<Row>(valueOrValues)) {
+		if (isArray<StoreRecord>(valueOrValues)) {
 			return Promise.all(
 				valueOrValues.map((value) => promisifyRequest(wrapCall(() => this.#store.put(value)))),
 			)
@@ -107,13 +112,13 @@ export class IndexedDBTransactionStore implements IndexedDBTransactionStoreInter
 		)
 	}
 
-	add(values: readonly Row[]): Promise<readonly IDBValidKey[]>
-	add(value: Row, key?: IDBValidKey): Promise<IDBValidKey>
+	add(values: readonly StoreRecord[]): Promise<readonly IDBValidKey[]>
+	add(value: StoreRecord, key?: IDBValidKey): Promise<IDBValidKey>
 	async add(
-		valueOrValues: Row | readonly Row[],
+		valueOrValues: StoreRecord | readonly StoreRecord[],
 		key?: IDBValidKey,
 	): Promise<IDBValidKey | readonly IDBValidKey[]> {
-		if (isArray<Row>(valueOrValues)) {
+		if (isArray<StoreRecord>(valueOrValues)) {
 			return Promise.all(
 				valueOrValues.map((value) => promisifyRequest(wrapCall(() => this.#store.add(value)))),
 			)
@@ -149,7 +154,7 @@ export class IndexedDBTransactionStore implements IndexedDBTransactionStoreInter
 		return cursor ? new IndexedDBCursor(cursor, request) : null
 	}
 
-	async #resolve(key: IDBValidKey): Promise<Row> {
+	async #resolve(key: IDBValidKey): Promise<StoreRecord> {
 		const value = await readRecord(this.#store, key)
 		if (value === undefined) {
 			throw new IndexedDBError(

@@ -238,7 +238,7 @@ await new GuideCommand({
 				"await promisifyRequest(wrapCall(() => native.get('u1'))) // sync throw → IndexedDBError too",
 			)
 			expect(guideText).toContain(
-				"await readRecord(native, 'u1') // narrowed to Row (or undefined) with isRecord",
+				"await readRecord(native, 'u1') // narrowed to StoreRecord (or undefined) with isRecord",
 			)
 			expect(guideText).toContain(
 				'await readRecords(native) // every record, narrowed the same way',
@@ -248,7 +248,7 @@ await new GuideCommand({
 				'await promisifyTransaction(native.transaction) // resolves after the transaction commits',
 			)
 			expect(guideText).toContain(
-				'wrapError(null) // the same DOMException → IndexedDBError mapping every bridge uses',
+				'wrapDOMException(null) // the same DOMException → IndexedDBError mapping every bridge uses',
 			)
 		})
 

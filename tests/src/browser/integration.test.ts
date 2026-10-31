@@ -13,7 +13,7 @@ import {
 	readRecord,
 	readRecords,
 	wrapCall,
-	wrapError,
+	wrapDOMException,
 } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createTeardown } from '@orkestrel/test'
@@ -192,7 +192,7 @@ describe('guides/indexeddb.md — The request-boundary helpers directly', () => 
 				id: 'u1',
 				name: 'Ada',
 			})
-			// narrowed to Row (or undefined) with isRecord
+			// narrowed to StoreRecord (or undefined) with isRecord
 			expect(await readRecord(native, 'u1')).toEqual({ id: 'u1', name: 'Ada' })
 			// every record, narrowed the same way
 			expect((await readRecords(native)).map((row) => row.id)).toEqual(['u1', 'u2'])
@@ -204,7 +204,7 @@ describe('guides/indexeddb.md — The request-boundary helpers directly', () => 
 		})
 
 		// the same DOMException → IndexedDBError mapping every bridge uses
-		const unknown = wrapError(null)
+		const unknown = wrapDOMException(null)
 		expect(unknown).toBeInstanceOf(IndexedDBError)
 		expect(unknown.code).toBe('UNKNOWN')
 	})

@@ -4,7 +4,7 @@ import type {
 	IndexedDBIndexInterface,
 	IndexedDBStoreInterface,
 	KeyPath,
-	Row,
+	StoreRecord,
 	StoreDefinition,
 } from './types.js'
 import { isArray } from '@orkestrel/contract'
@@ -68,11 +68,11 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 		return this.#definition.increment ?? false
 	}
 
-	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<Row | undefined>>
-	get(key: IDBValidKey): Promise<Row | undefined>
+	get(keys: readonly IDBValidKey[]): Promise<ReadonlyArray<StoreRecord | undefined>>
+	get(key: IDBValidKey): Promise<StoreRecord | undefined>
 	async get(
 		keyOrKeys: IDBValidKey | readonly IDBValidKey[],
-	): Promise<Row | undefined | ReadonlyArray<Row | undefined>> {
+	): Promise<StoreRecord | undefined | ReadonlyArray<StoreRecord | undefined>> {
 		const engine = await this.#engine('readonly')
 		// The branch arms are identical text and differ only in the overload they
 		// select: the engine declares an array signature and a single-key
@@ -81,16 +81,21 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 		return engine.get(keyOrKeys)
 	}
 
-	resolve(keys: readonly IDBValidKey[]): Promise<readonly Row[]>
-	resolve(key: IDBValidKey): Promise<Row>
-	async resolve(keyOrKeys: IDBValidKey | readonly IDBValidKey[]): Promise<Row | readonly Row[]> {
+	resolve(keys: readonly IDBValidKey[]): Promise<readonly StoreRecord[]>
+	resolve(key: IDBValidKey): Promise<StoreRecord>
+	async resolve(
+		keyOrKeys: IDBValidKey | readonly IDBValidKey[],
+	): Promise<StoreRecord | readonly StoreRecord[]> {
 		const engine = await this.#engine('readonly')
 		// Overload selection, as in the `get` method.
 		if (isArray<IDBValidKey>(keyOrKeys)) return engine.resolve(keyOrKeys)
 		return engine.resolve(keyOrKeys)
 	}
 
-	async records(query?: IDBKeyRange | IDBValidKey, count?: number): Promise<readonly Row[]> {
+	async records(
+		query?: IDBKeyRange | IDBValidKey,
+		count?: number,
+	): Promise<readonly StoreRecord[]> {
 		const engine = await this.#engine('readonly')
 		return engine.records(query, count)
 	}
@@ -116,28 +121,28 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 		return engine.count(query)
 	}
 
-	set(values: readonly Row[]): Promise<readonly IDBValidKey[]>
-	set(value: Row, key?: IDBValidKey): Promise<IDBValidKey>
+	set(values: readonly StoreRecord[]): Promise<readonly IDBValidKey[]>
+	set(value: StoreRecord, key?: IDBValidKey): Promise<IDBValidKey>
 	async set(
-		valueOrValues: Row | readonly Row[],
+		valueOrValues: StoreRecord | readonly StoreRecord[],
 		key?: IDBValidKey,
 	): Promise<IDBValidKey | readonly IDBValidKey[]> {
 		const engine = await this.#engine('readwrite')
-		const written = isArray<Row>(valueOrValues)
+		const written = isArray<StoreRecord>(valueOrValues)
 			? await engine.set(valueOrValues)
 			: await engine.set(valueOrValues, key)
 		await promisifyTransaction(engine.store.transaction)
 		return written
 	}
 
-	add(values: readonly Row[]): Promise<readonly IDBValidKey[]>
-	add(value: Row, key?: IDBValidKey): Promise<IDBValidKey>
+	add(values: readonly StoreRecord[]): Promise<readonly IDBValidKey[]>
+	add(value: StoreRecord, key?: IDBValidKey): Promise<IDBValidKey>
 	async add(
-		valueOrValues: Row | readonly Row[],
+		valueOrValues: StoreRecord | readonly StoreRecord[],
 		key?: IDBValidKey,
 	): Promise<IDBValidKey | readonly IDBValidKey[]> {
 		const engine = await this.#engine('readwrite')
-		const written = isArray<Row>(valueOrValues)
+		const written = isArray<StoreRecord>(valueOrValues)
 			? await engine.add(valueOrValues)
 			: await engine.add(valueOrValues, key)
 		await promisifyTransaction(engine.store.transaction)

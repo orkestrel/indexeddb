@@ -1,4 +1,4 @@
-import type { IndexDefinition, Row } from './types.js'
+import type { IndexDefinition, StoreRecord } from './types.js'
 import { isRecord, isString } from '@orkestrel/contract'
 import { ERROR_CODES } from './constants.js'
 import { IndexedDBError } from './errors.js'
@@ -10,7 +10,7 @@ import { IndexedDBError } from './errors.js'
 // (`IDBRequest` → value, `IDBTransaction` → completion), the key-range builders
 // that name a boundary the native call states as a bare boolean, and the small
 // read primitives the store / index / transaction-store classes share over a native
-// `IDBObjectStore | IDBIndex`, each narrowing the structured clone to a `Row`
+// `IDBObjectStore | IDBIndex`, each narrowing the structured clone to a `StoreRecord`
 // with `isRecord` at the boundary (the same `as`-free bridge used throughout).
 
 /**
@@ -59,7 +59,7 @@ export function promisifyRequest<T>(request: IDBRequest<T>): Promise<T> {
 			'error',
 			() => {
 				settled.abort()
-				reject(wrapError(request.error))
+				reject(wrapDOMException(request.error))
 			},
 			{ signal: settled.signal },
 		)
@@ -82,8 +82,8 @@ export function promisifyTransaction(transaction: IDBTransaction): Promise<void>
 		// constructor tracks `active` / `finished` the same way) — assigning would
 		// clobber whichever handler ran second to set up.
 		transaction.addEventListener('complete', () => resolve())
-		transaction.addEventListener('error', () => reject(wrapError(transaction.error)))
-		transaction.addEventListener('abort', () => reject(wrapError(transaction.error)))
+		transaction.addEventListener('error', () => reject(wrapDOMException(transaction.error)))
+		transaction.addEventListener('abort', () => reject(wrapDOMException(transaction.error)))
 	})
 }
 
@@ -107,13 +107,13 @@ export function wrapCall<T>(action: () => T): T {
 	try {
 		return action()
 	} catch (error) {
-		if (error instanceof DOMException) throw wrapError(error)
+		if (error instanceof DOMException) throw wrapDOMException(error)
 		throw error
 	}
 }
 
 /**
- * Reads one record by key from a store or index, narrowing it to a {@link Row}.
+ * Reads one record by key from a store or index, narrowing it to a {@link StoreRecord}.
  *
  * @remarks
  * The shared point-read of every store-like class (`IndexedDBStore`,
@@ -129,14 +129,14 @@ export function wrapCall<T>(action: () => T): T {
 export async function readRecord(
 	source: IDBObjectStore | IDBIndex,
 	key: IDBValidKey,
-): Promise<Row | undefined> {
+): Promise<StoreRecord | undefined> {
 	const value = await promisifyRequest<unknown>(wrapCall(() => source.get(key)))
 	return isRecord(value) ? value : undefined
 }
 
 /**
  * Reads many records from a store or index over an optional key range, narrowing each
- * to a `Row`.
+ * to a `StoreRecord`.
  *
  * @remarks
  * The shared bulk read of every store-like class: issue the native `getAll` over
@@ -153,7 +153,7 @@ export async function readRecords(
 	source: IDBObjectStore | IDBIndex,
 	query?: IDBKeyRange | IDBValidKey,
 	count?: number,
-): Promise<readonly Row[]> {
+): Promise<readonly StoreRecord[]> {
 	const all = await promisifyRequest<unknown[]>(wrapCall(() => source.getAll(query, count)))
 	return all.filter(isRecord)
 }
@@ -261,7 +261,7 @@ export function rangePrefix(value: string): IDBKeyRange {
  * @param error - The native error, or `null` when none is attached
  * @returns The wrapped, typed error
  */
-export function wrapError(error: DOMException | null): IndexedDBError {
+export function wrapDOMException(error: DOMException | null): IndexedDBError {
 	if (error === null) return new IndexedDBError('UNKNOWN', 'Unknown IndexedDB error')
 	const code = ERROR_CODES[error.name] ?? 'UNKNOWN'
 	return new IndexedDBError(code, error.message || `IndexedDB error: ${error.name}`, error)

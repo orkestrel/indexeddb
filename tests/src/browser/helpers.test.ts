@@ -1,3 +1,4 @@
+import type { StoreRecord } from '@src/browser'
 import {
 	createIndex,
 	hasKey,
@@ -14,7 +15,7 @@ import {
 	readRecords,
 	supportsIndexedDB,
 	wrapCall,
-	wrapError,
+	wrapDOMException,
 } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import { captureError, createTeardown } from '@orkestrel/test'
@@ -31,7 +32,7 @@ import { createTestDatabase, dropDatabase, errorCode, mintDatabase } from '../..
 // success and the `IndexedDBError`-wrapped rejection, `wrapCall` over each of
 // the three paths it can take (a returned value, a thrown `DOMException`, and a
 // throw of anything else), the `context` an `IndexedDBError` carries beside its
-// `code`, and `wrapError` mapping a real `DOMException` (and a `null`) to the
+// `code`, and `wrapDOMException` mapping a real `DOMException` (and a `null`) to the
 // right `IndexedDBError` code. Each store-backed test opens a uniquely-named
 // database through the shared opener.
 
@@ -109,6 +110,18 @@ describe('readRecord / readRecords / hasKey — over a real store', () => {
 		})
 	})
 
+	it('readRecord reads back the StoreRecord a store wrote, as a structured clone', async () => {
+		const record: StoreRecord = { id: 'r1', tags: ['admin'], profile: { age: 36 } }
+		const { db, cleanup } = await createTestDatabase({ store: { path: 'id' } })
+		teardown.add(cleanup)
+		await db.store('store').set(record)
+		await db.read('store', async (transaction) => {
+			const read: StoreRecord | undefined = await readRecord(transaction.store('store').store, 'r1')
+			expect(read).toEqual({ id: 'r1', tags: ['admin'], profile: { age: 36 } })
+			expect(read).not.toBe(record)
+		})
+	})
+
 	it('readRecords keeps only records and honours a key range and count', async () => {
 		const { db, cleanup } = await createTestDatabase({ store: {} })
 		teardown.add(cleanup)
@@ -138,7 +151,7 @@ describe('readRecord / readRecords / hasKey — over a real store', () => {
 		await db.read('users', async (transaction) => {
 			const index = transaction.store('users').store.index('byAge')
 			expect(await readRecord(index, 30)).toEqual({ id: 'b', age: 30 })
-			expect((await readRecords(index)).map((row) => row.id)).toEqual(['a', 'b'])
+			expect((await readRecords(index)).map((record) => record.id)).toEqual(['a', 'b'])
 		})
 	})
 
@@ -299,10 +312,10 @@ describe('wrapCall — synchronous native call boundary', () => {
 	})
 })
 
-describe('wrapError — DOMException → IndexedDBError', () => {
+describe('wrapDOMException — DOMException → IndexedDBError', () => {
 	it('maps a known DOMException.name to its code, keeping the message and cause', () => {
 		const native = new DOMException('unique key already exists', 'ConstraintError')
-		const wrapped = wrapError(native)
+		const wrapped = wrapDOMException(native)
 		expect(wrapped).toBeInstanceOf(IndexedDBError)
 		expect(wrapped.code).toBe('CONSTRAINT')
 		expect(wrapped.message).toBe('unique key already exists')
@@ -310,23 +323,23 @@ describe('wrapError — DOMException → IndexedDBError', () => {
 	})
 
 	it('maps each other known name to its code', () => {
-		expect(wrapError(new DOMException('', 'QuotaExceededError')).code).toBe('QUOTA')
-		expect(wrapError(new DOMException('', 'AbortError')).code).toBe('ABORTED')
-		expect(wrapError(new DOMException('', 'NotFoundError')).code).toBe('NOT_FOUND')
-		expect(wrapError(new DOMException('', 'DataError')).code).toBe('DATA')
-		expect(wrapError(new DOMException('', 'VersionError')).code).toBe('UPGRADE')
-		expect(wrapError(new DOMException('', 'TransactionInactiveError')).code).toBe('INACTIVE')
-		expect(wrapError(new DOMException('', 'InvalidStateError')).code).toBe('INVALID')
+		expect(wrapDOMException(new DOMException('', 'QuotaExceededError')).code).toBe('QUOTA')
+		expect(wrapDOMException(new DOMException('', 'AbortError')).code).toBe('ABORTED')
+		expect(wrapDOMException(new DOMException('', 'NotFoundError')).code).toBe('NOT_FOUND')
+		expect(wrapDOMException(new DOMException('', 'DataError')).code).toBe('DATA')
+		expect(wrapDOMException(new DOMException('', 'VersionError')).code).toBe('UPGRADE')
+		expect(wrapDOMException(new DOMException('', 'TransactionInactiveError')).code).toBe('INACTIVE')
+		expect(wrapDOMException(new DOMException('', 'InvalidStateError')).code).toBe('INVALID')
 	})
 
 	it('falls back to UNKNOWN for an unmapped name, synthesizing a message', () => {
-		const wrapped = wrapError(new DOMException('', 'TypeMismatchError'))
+		const wrapped = wrapDOMException(new DOMException('', 'TypeMismatchError'))
 		expect(wrapped.code).toBe('UNKNOWN')
 		expect(wrapped.message).toBe('IndexedDB error: TypeMismatchError')
 	})
 
 	it('falls back to UNKNOWN with a generic message for a null error', () => {
-		const wrapped = wrapError(null)
+		const wrapped = wrapDOMException(null)
 		expect(wrapped).toBeInstanceOf(IndexedDBError)
 		expect(wrapped.code).toBe('UNKNOWN')
 		expect(wrapped.message).toBe('Unknown IndexedDB error')
@@ -344,11 +357,13 @@ describe('IndexedDBError — machine-readable context', () => {
 		expect(error.context).toEqual({ store: 'users', key: 'ghost' })
 	})
 
-	it('reports undefined for a fault carrying none, wrapError results included', () => {
+	it('reports undefined for a fault carrying none, wrapDOMException results included', () => {
 		expect(new IndexedDBError('CLOSED', 'the handle is closed').context).toBeUndefined()
-		// A native fault already rides as `cause`, so `wrapError` passes no context.
-		expect(wrapError(new DOMException('duplicate', 'ConstraintError')).context).toBeUndefined()
-		expect(wrapError(null).context).toBeUndefined()
+		// A native fault already rides as `cause`, so `wrapDOMException` passes no context.
+		expect(
+			wrapDOMException(new DOMException('duplicate', 'ConstraintError')).context,
+		).toBeUndefined()
+		expect(wrapDOMException(null).context).toBeUndefined()
 	})
 })
 
