@@ -15,6 +15,8 @@ import { commands } from './configs/commands.js'
 import { fileURLToPath, URL } from 'node:url'
 
 const browserOptions = resolveBrowser(resolvePinnedBrowser(), process.platform, process.env)
+// Vitest writes a page.screenshot() capture beside its test file unless a directory is named.
+const screenshots = resolveWorkspacePath('tmp/captures/screenshots')
 
 const optimizeDeps = {
 	include: ['@orkestrel/test', '@orkestrel/test/browser', '@orkestrel/contract'],
@@ -185,6 +187,7 @@ export function srcBrowser(override?: UserConfig): UserConfig {
 				enabled: true,
 				provider: playwright(browserOptions),
 				commands,
+				screenshotDirectory: screenshots,
 				instances: [{ browser: 'chromium', headless: true }],
 			},
 			fileParallelism: false,
@@ -255,6 +258,7 @@ export function setupBrowser(override?: UserConfig): UserConfig {
 				enabled: true,
 				provider: playwright(browserOptions),
 				commands,
+				screenshotDirectory: screenshots,
 				instances: [{ browser: 'chromium', headless: true }],
 			},
 		},
