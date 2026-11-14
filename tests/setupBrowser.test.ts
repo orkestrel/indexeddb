@@ -49,6 +49,11 @@ import {
 //   `tests/src/browser/helpers.test.ts`;
 // - `seedUsers` by `tests/src/browser/IndexedDBIndex.test.ts`;
 // - `seedStore` by `tests/src/browser/IndexedDBCursor.test.ts`;
+// - `recordTransactions` and `createTransactionPatch` by the `transactions per call` suites of
+//   `tests/src/browser/IndexedDBStore.test.ts`, `tests/src/browser/IndexedDBIndex.test.ts`, and
+//   `tests/src/browser/IndexedDBDatabase.test.ts`, whose controls read a native transaction the
+//   test opens itself and the restoration of the native method after a throwing run;
+// - `openDatabase` by the connect cases of `tests/src/browser/IndexedDBDatabase.test.ts`;
 // - `readRecordClaim` by `tests/src/browser/integration.test.ts`, which asserts the guide's
 //   invariant 7 over the reading it returns;
 // - `seedNonRecord` by `tests/src/browser/IndexedDBStore.test.ts`,

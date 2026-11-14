@@ -1,3 +1,4 @@
+import type { IndexedDBStoreInterface } from '@src/browser'
 import {
 	IndexedDBError,
 	isIndexedDBError,
@@ -13,6 +14,8 @@ import {
 	errorCode,
 	SEED_BOOK_STORES,
 	seedNonRecord,
+	seedStore,
+	recordTransactions,
 } from '../../setupBrowser.js'
 
 // `IndexedDBStoreInterface` in real Chromium, reached through `db.store(name)`:
@@ -390,5 +393,85 @@ describe('IndexedDBStore — requests a bulk read issues', () => {
 		})
 		expect(successes.calls).toHaveLength(2)
 		listening.abort()
+	})
+})
+
+const READS = [
+	['get', (users: IndexedDBStoreInterface) => users.get('a')],
+	['get with an array', (users: IndexedDBStoreInterface) => users.get(['a', 'b', 'c'])],
+	['resolve', (users: IndexedDBStoreInterface) => users.resolve('a')],
+	['resolve with an array', (users: IndexedDBStoreInterface) => users.resolve(['a', 'b'])],
+	['records', (users: IndexedDBStoreInterface) => users.records()],
+	['keys', (users: IndexedDBStoreInterface) => users.keys()],
+	['has', (users: IndexedDBStoreInterface) => users.has('a')],
+	['has with an array', (users: IndexedDBStoreInterface) => users.has(['a', 'z'])],
+	['count', (users: IndexedDBStoreInterface) => users.count()],
+] as const
+
+const WRITES = [
+	['set', (users: IndexedDBStoreInterface) => users.set({ id: 'd', n: 4 })],
+	['set with an array', (users: IndexedDBStoreInterface) => users.set([{ id: 'e' }, { id: 'f' }])],
+	['add', (users: IndexedDBStoreInterface) => users.add({ id: 'g', n: 7 })],
+	['add with an array', (users: IndexedDBStoreInterface) => users.add([{ id: 'h' }, { id: 'i' }])],
+	['remove', (users: IndexedDBStoreInterface) => users.remove('a')],
+	['remove with an array', (users: IndexedDBStoreInterface) => users.remove(['b', 'c'])],
+	['clear', (users: IndexedDBStoreInterface) => users.clear()],
+	['cursor', (users: IndexedDBStoreInterface) => users.cursor()],
+] as const
+
+describe('IndexedDBStore — transactions per call', () => {
+	it.each(READS)('opens one readonly transaction for %s', async (_label, call) => {
+		const users = (await seedStore(teardown)).store('users')
+		const readings = await recordTransactions(() => call(users))
+		expect(readings).toEqual([{ stores: ['users'], mode: 'readonly' }])
+	})
+
+	it.each(WRITES)('opens one readwrite transaction for %s', async (_label, call) => {
+		const users = (await seedStore(teardown)).store('users')
+		const readings = await recordTransactions(() => call(users))
+		expect(readings).toEqual([{ stores: ['users'], mode: 'readwrite' }])
+	})
+
+	it('opens no transaction for the index accessor or a metadata read', async () => {
+		const { db, cleanup } = await createTestDatabase(SEED_BOOK_STORES)
+		teardown.add(cleanup)
+		const books = db.store('books')
+		const readings = await recordTransactions(() => {
+			books.index('byLength')
+			return Promise.resolve([books.name, books.path, books.indexes, books.increment])
+		})
+		expect(readings).toEqual([])
+	})
+
+	it('opens none for the moves of a cursor it holds', async () => {
+		const users = (await seedStore(teardown)).store('users')
+		const first = await users.cursor()
+		const readings = await recordTransactions(async () => {
+			const second = await first?.continue()
+			await second?.update({ id: 'b', n: 20 })
+			const third = await second?.advance(1)
+			await third?.remove()
+		})
+		expect(readings).toEqual([])
+	})
+
+	it('opens one transaction for each call of a sequence, where a scope opens one for all', async () => {
+		const db = await seedStore(teardown)
+		const users = db.store('users')
+		const standalone = await recordTransactions(async () => {
+			await users.get('a')
+			await users.get('b')
+			await users.set({ id: 'a', n: 9 })
+		})
+		expect(standalone).toHaveLength(3)
+		const scoped = await recordTransactions(() =>
+			db.write('users', async (transaction) => {
+				const bound = transaction.store('users')
+				await bound.get('a')
+				await bound.get('b')
+				await bound.set({ id: 'a', n: 9 })
+			}),
+		)
+		expect(scoped).toEqual([{ stores: ['users'], mode: 'readwrite' }])
 	})
 })

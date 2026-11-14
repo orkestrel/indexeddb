@@ -853,3 +853,93 @@ export async function removeInactive(cursor: IndexedDBCursorInterface | null): P
 	if (cursor.value.active === false) await cursor.remove()
 	await removeInactive(await cursor.continue())
 }
+
+/** Represents one `IDBDatabase.transaction` call the recorder read: the scope and the mode. */
+export interface TransactionReading {
+	readonly stores: readonly string[]
+	readonly mode: IDBTransactionMode
+}
+
+/**
+ * Builds the recording replacement for `IDBDatabase.prototype.transaction`: it pushes one
+ * reading per call, then runs the native method it replaces with the caller's arguments.
+ *
+ * @param original - The native `transaction` method to run after each reading
+ * @param readings - The list that receives one reading per call
+ * @returns A method with the native signature
+ */
+export function createTransactionPatch(
+	original: IDBDatabase['transaction'],
+	readings: TransactionReading[],
+): IDBDatabase['transaction'] {
+	return function (
+		this: IDBDatabase,
+		names: string | string[],
+		mode?: IDBTransactionMode,
+		options?: IDBTransactionOptions,
+	): IDBTransaction {
+		readings.push({
+			stores: typeof names === 'string' ? [names] : [...names],
+			mode: mode ?? 'readonly',
+		})
+		return original.call(this, names, mode, options)
+	}
+}
+
+/**
+ * Reads every transaction a run opens on the real engine: it wraps
+ * `IDBDatabase.prototype.transaction` for the length of `run`, restores the native method
+ * after `run` settles or throws, and returns one reading per call.
+ *
+ * @param run - The calls under measurement
+ * @returns The readings in call order
+ *
+ * @remarks
+ * Version-change transactions open through `indexedDB.open`, so the recorder never reads
+ * them. The wrapper runs the native method, so the engine behaves as it does unrecorded.
+ */
+export async function recordTransactions(
+	run: () => Promise<unknown>,
+): Promise<readonly TransactionReading[]> {
+	const readings: TransactionReading[] = []
+	const original = IDBDatabase.prototype.transaction
+	Object.defineProperty(IDBDatabase.prototype, 'transaction', {
+		value: createTransactionPatch(original, readings),
+		configurable: true,
+		writable: true,
+	})
+	try {
+		await run()
+	} finally {
+		Object.defineProperty(IDBDatabase.prototype, 'transaction', {
+			value: original,
+			configurable: true,
+			writable: true,
+		})
+	}
+	return readings
+}
+
+/**
+ * Builds an unconnected database handle under a unique name, and adds a cleanup that closes
+ * and deletes it to `teardown` — the opener for a test that measures the connect itself.
+ *
+ * @param teardown - The teardown list that closes and deletes the database
+ * @param stores - The store schema
+ * @param version - A pinned schema version, or omitted for auto-managed mode
+ * @returns The handle, not yet connected
+ */
+export function openDatabase<const Stores extends IndexedDBSchema>(
+	teardown: TeardownInterface,
+	stores: Stores,
+	version?: number,
+): IndexedDBDatabaseInterface<Stores> {
+	const name = mintDatabase()
+	const db = createIndexedDBDatabase({
+		name,
+		...(version === undefined ? {} : { version }),
+		stores,
+	})
+	teardown.add(createDatabaseCleanup(db, name))
+	return db
+}

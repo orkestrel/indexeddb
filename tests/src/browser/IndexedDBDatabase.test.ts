@@ -35,6 +35,8 @@ import {
 	OPTIONS_REFUSAL_HEADER,
 	OPTIONS_REFUSAL_SUMMARY,
 	mintDatabase,
+	openDatabase,
+	recordTransactions,
 	REFUSED_OPTIONS,
 } from '../../setupBrowser.js'
 
@@ -1736,5 +1738,106 @@ describe('IndexedDBDatabase — construction reads the options once', () => {
 		expect(caught).toHaveProperty('context', {
 			clone: 'cloneJSONValue: snapshot exceeds the node limit 262144',
 		})
+	})
+})
+
+const INDEXED = { users: { path: 'id', indexes: [{ name: 'byAge', path: 'age' }] } } as const
+
+describe('IndexedDBDatabase — transactions per call', () => {
+	it('control: reads a native transaction the test opens itself, and none from a no-op', async () => {
+		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
+		teardown.add(cleanup)
+		const opened = await recordTransactions(() => {
+			db.database.transaction(['users'], 'readwrite')
+			db.database.transaction('users')
+			return Promise.resolve()
+		})
+		expect(opened).toEqual([
+			{ stores: ['users'], mode: 'readwrite' },
+			{ stores: ['users'], mode: 'readonly' },
+		])
+		const idle = await recordTransactions(() => Promise.resolve(db.name))
+		expect(idle).toEqual([])
+	})
+
+	it('control: restores the native method after a run that throws', async () => {
+		const native = IDBDatabase.prototype.transaction
+		const caught = await recordTransactions(() => Promise.reject(new Error('boom'))).catch(
+			(error: unknown) => error,
+		)
+		expect(caught).toBeInstanceOf(Error)
+		expect(IDBDatabase.prototype.transaction).toBe(native)
+	})
+
+	it('opens none to connect with a pinned version, and none to connect again', async () => {
+		const db = openDatabase(teardown, INDEXED, 1)
+		expect(await recordTransactions(() => db.connect())).toEqual([])
+		expect(await recordTransactions(() => db.connect())).toEqual([])
+	})
+
+	it('opens one readonly transaction to connect without a version over declared indexes, none after', async () => {
+		const db = openDatabase(teardown, INDEXED)
+		expect(await recordTransactions(() => db.connect())).toEqual([
+			{ stores: ['users'], mode: 'readonly' },
+		])
+		expect(await recordTransactions(() => db.connect())).toEqual([])
+	})
+
+	it('opens none to connect without a version over stores that declare no index', async () => {
+		const db = openDatabase(teardown, { users: { path: 'id' } })
+		expect(await recordTransactions(() => db.connect())).toEqual([])
+	})
+
+	it('opens none for the store accessor, the state getters, close, and drop', async () => {
+		const db = openDatabase(teardown, { users: { path: 'id' } }, 1)
+		await db.connect()
+		const readings = await recordTransactions(async () => {
+			db.store('users')
+			await Promise.resolve([db.name, db.version, db.stores, db.open, db.database])
+			db.close()
+			await db.drop()
+		})
+		expect(readings).toEqual([])
+	})
+
+	it('opens one transaction to connect and run a first store call on a pinned version', async () => {
+		const db = openDatabase(teardown, { users: { path: 'id' } }, 1)
+		const readings = await recordTransactions(() => db.store('users').get('a'))
+		expect(readings).toEqual([{ stores: ['users'], mode: 'readonly' }])
+	})
+
+	it('opens one transaction for a read scope over several stores', async () => {
+		const { db, cleanup } = await createTestDatabase({
+			users: { path: 'id' },
+			posts: { path: 'id' },
+		})
+		teardown.add(cleanup)
+		const readings = await recordTransactions(() =>
+			db.read(['users', 'posts'], async (transaction) => {
+				await transaction.store('users').get('a')
+				await transaction.store('posts').get('a')
+			}),
+		)
+		expect(readings).toEqual([{ stores: ['users', 'posts'], mode: 'readonly' }])
+	})
+
+	it('opens one transaction for a write scope, and one for a scope that throws', async () => {
+		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
+		teardown.add(cleanup)
+		const written = await recordTransactions(() =>
+			db.write('users', async (transaction) => {
+				await transaction.store('users').set({ id: 'a' })
+				await transaction.store('users').set({ id: 'b' })
+			}),
+		)
+		expect(written).toEqual([{ stores: ['users'], mode: 'readwrite' }])
+		const thrown = await recordTransactions(() =>
+			db
+				.write('users', () => {
+					throw new Error('boom')
+				})
+				.catch(() => undefined),
+		)
+		expect(thrown).toEqual([{ stores: ['users'], mode: 'readwrite' }])
 	})
 })

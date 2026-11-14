@@ -1,3 +1,4 @@
+import type { IndexedDBIndexInterface } from '@src/browser'
 import {
 	IndexedDBError,
 	isIndexedDBError,
@@ -14,6 +15,7 @@ import {
 	SEED_BOOK_STORES,
 	seedNonRecord,
 	seedUsers,
+	recordTransactions,
 } from '../../setupBrowser.js'
 
 // `IndexedDBIndexInterface` in real Chromium, reached through
@@ -242,5 +244,27 @@ describe('IndexedDBIndex — the primary key a failing read names under repeated
 		expect(errorCode(point)).toBe('RECORD')
 		expect(point).toHaveProperty('context', { store: 'books', index: 'byLength', key: 'd' })
 		expect(String(point)).not.toContain('wxyz')
+	})
+})
+
+const CALLS = [
+	['get', (byAge: IndexedDBIndexInterface) => byAge.get(30)],
+	['get with an array', (byAge: IndexedDBIndexInterface) => byAge.get([20, 30])],
+	['resolve', (byAge: IndexedDBIndexInterface) => byAge.resolve(30)],
+	['resolve with an array', (byAge: IndexedDBIndexInterface) => byAge.resolve([20, 30])],
+	['records', (byAge: IndexedDBIndexInterface) => byAge.records()],
+	['keys', (byAge: IndexedDBIndexInterface) => byAge.keys()],
+	['primary', (byAge: IndexedDBIndexInterface) => byAge.primary(30)],
+	['has', (byAge: IndexedDBIndexInterface) => byAge.has(30)],
+	['has with an array', (byAge: IndexedDBIndexInterface) => byAge.has([20, 99])],
+	['count', (byAge: IndexedDBIndexInterface) => byAge.count()],
+	['cursor', (byAge: IndexedDBIndexInterface) => byAge.cursor()],
+] as const
+
+describe('IndexedDBIndex — transactions per call', () => {
+	it.each(CALLS)('opens one readonly transaction for %s', async (_label, call) => {
+		const byAge = (await seedUsers(teardown)).store('users').index('byAge')
+		const readings = await recordTransactions(() => call(byAge))
+		expect(readings).toEqual([{ stores: ['users'], mode: 'readonly' }])
 	})
 })
