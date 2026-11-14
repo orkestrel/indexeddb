@@ -28,12 +28,12 @@ describe('definition shapes', () => {
 		expectTypeOf<Infer<typeof indexedDBSchemaShape>>().toEqualTypeOf<IndexedDBSchema>()
 	})
 
-	it('bind the options shape to IndexedDBDatabaseOptions, with upgrade read as its preview', () => {
+	it('bind the options shape to IndexedDBDatabaseOptions, with upgrade as a function', () => {
 		expectTypeOf<Omit<Infer<typeof indexedDBDatabaseOptionsShape>, 'upgrade'>>().toEqualTypeOf<
 			Omit<IndexedDBDatabaseOptions, 'upgrade'>
 		>()
 		expectTypeOf<Infer<typeof indexedDBDatabaseOptionsShape>['upgrade']>().toEqualTypeOf<
-			'function' | undefined
+			((...args: never[]) => unknown) | undefined
 		>()
 	})
 })
@@ -120,14 +120,14 @@ describe('indexedDBSchemaContract', () => {
 })
 
 describe('indexedDBDatabaseOptionsContract', () => {
-	it('admits a name and stores, with an optional version and an upgrade read as its preview', () => {
+	it('admits a name and stores, with an optional version and an upgrade function', () => {
 		expect(indexedDBDatabaseOptionsContract.is({ name: 'catalogue', stores: {} })).toBe(true)
 		expect(
 			indexedDBDatabaseOptionsContract.is({
 				name: 'catalogue',
 				version: 2,
 				stores: { books: { path: 'id' } },
-				upgrade: 'function',
+				upgrade: () => {},
 			}),
 		).toBe(true)
 	})

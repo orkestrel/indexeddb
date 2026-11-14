@@ -50,9 +50,7 @@ export const indexedDBSchemaContract: ContractInterface<IndexedDBSchema> =
 
 /**
  * Holds the compiled contract of the database options, which the database constructor admits
- * its whole options record through, with `upgrade` read as its preview, because
- * `@orkestrel/contract` has no shape or fault kind for a function, until contract gains a
- * function shape.
+ * its whole options record through.
  *
  * @example
  * ```ts

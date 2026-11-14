@@ -37,9 +37,8 @@ export type StoreRecord = Record<string, unknown>
  * argument, which carries `context`: a database constructor refusal carries `{ faults }`
  * for every malformed option at once, among options that are JSON data, or `{ clone }` with
  * the contract clone error as `cause` when the options are not JSON data contract can clone
- * (a stated limit: that cause names the failure but not the member's path, and one member that
- * is not JSON data hides the faults of every other option, until contract's clone error carries
- * a path, which the campaign's contract unit owns); `context.stores.create` and
+ * (a stated limit: one member that is not JSON data hides the faults of every other
+ * option); `context.stores.create` and
  * `context.indexes.create` carry `{ store, faults }`),
  * `OPEN` / `UPGRADE` (a failed open or schema upgrade), `INACTIVE` (the
  * transaction went inactive — IndexedDB's auto-commit fault, raised when an
@@ -212,23 +211,20 @@ export interface IndexedDBUpgradeContext {
  *
  * @remarks
  * The constructor checks the whole options record through
- * `indexedDBDatabaseOptionsContract`, with `upgrade` read as its preview, and refuses it with
+ * `indexedDBDatabaseOptionsContract` and refuses it with
  * one `DATA` that names every malformed option at once, among options that are JSON data: a
  * `name` that is not a non-empty string, `stores` outside {@link IndexedDBSchema}, a `version`
  * that is not an integer of at least 1, an `upgrade` that is not a function, and any undeclared
  * option. Its `context` is `{ faults }`. The constructor reads the caller's options once,
- * through one top-level copy with `upgrade` read as its preview, and clones that copy once with
- * `cloneJSONRecord`; the check and the audit both run on that clone, so no getter is read twice
- * and the faults are the refused value's. A value contract cannot clone (one that is not JSON
+ * through one top-level copy, and clones that copy, minus `upgrade`, once with `cloneJSONRecord`;
+ * `upgrade` is never cloned, and the check and the audit both run on that clone with `upgrade`
+ * rejoined, so no getter is read twice and the faults are the refused value's. A value contract cannot clone (one that is not JSON
  * data, such as a member present as `undefined`, a class instance, a getter on a nested
  * definition, or a number that is not finite, or one past contract's clone node limit) is
  * refused with one `DATA` whose message and `context` (`{ clone }`) name that cause and whose
- * `cause` is the contract error. This is a stated limit: a value that is not JSON data (a member
- * present as `undefined`, a class instance, `NaN`, or an accessor) is refused with contract's
- * clone cause, which names the failure but not the member's path, and the clone refuses before
- * the contract checks, so one member that is not JSON data hides the faults of every other
- * option until contract's clone error carries a path, which the campaign's contract unit owns;
- * the refusal then names that path. An omitted option is absent, never present as `undefined`.
+ * `cause` is the contract error. The clone message ends with the member's path, such as
+ * `at stores.books.path`. This is a stated limit: the clone refuses before the contract
+ * checks, so one member that is not JSON data hides the faults of every other option. An omitted option is absent, never present as `undefined`.
  * The handle keeps the frozen clone it admitted, so a later change to the caller's objects
  * reaches nothing it creates.
  * `name` is passed to `indexedDB.open`. `version` is optional: give it to pin an

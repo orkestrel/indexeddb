@@ -294,7 +294,7 @@ export interface MessageName {
  * Lists the caller-supplied names every message proof drives: one carrying both quote
  * characters, and one longer than the 64 characters a message preview keeps, each beside the
  * exact text the message must show for it, and the text a contract fault line shows for it
- * as a received value, where a long value is quoted and capped a second time.
+ * as a received value, where a long value is capped once, at the total bound.
  */
 export const MESSAGE_NAMES: readonly MessageName[] = Object.freeze([
 	{
@@ -304,8 +304,8 @@ export const MESSAGE_NAMES: readonly MessageName[] = Object.freeze([
 	},
 	{
 		name: 'library-catalogue-library-catalogue-library-catalogue-library-catalogue-',
-		shown: '"library-catalogue-library-catalogue-library-catalogue-library-c…',
-		received: '"\\"library-catalogue-library-catalogue-library-catalogue-library…',
+		shown: '"library-catalogue-library-catalogue-library-catalogue-library-…',
+		received: '"library-catalogue-library-catalogue-library-catalogue-library-…',
 	},
 ])
 
@@ -436,7 +436,7 @@ export const OPTIONS_REFUSAL_HEADER = 'Database options must match IndexedDBData
 
 /** Holds the last line of every options refusal: the expected shape, as contract summarizes it. */
 export const OPTIONS_REFUSAL_SUMMARY =
-	'send {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}'
+	'send {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}'
 
 /** Represents one options value the types forbid, with the refusal construction must raise. */
 export interface RefusedOptions {
@@ -456,21 +456,22 @@ export const REFUSED_OPTIONS: readonly RefusedOptions[] = Object.freeze([
 	{
 		label: 'an undefined name',
 		options: { name: undefined, stores: {} },
-		message: 'Database options are not plain JSON data: cloneJSONValue: property is not JSON data',
-		context: { clone: 'cloneJSONValue: property is not JSON data' },
+		message:
+			'Database options are not plain JSON data: cloneJSONValue: property is not JSON data at name',
+		context: { clone: 'cloneJSONValue: property is not JSON data at name' },
 	},
 	{
 		label: 'a numeric name',
 		options: { name: 7, stores: {} },
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nname: type; expected string; received 7\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nname: type; expected string; received 7\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: { faults: [{ reason: 'type', path: ['name'], expected: 'string', received: '7' }] },
 	},
 	{
 		label: 'an empty name',
 		options: { name: '', stores: {} },
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nname: constraint; expected string; received ""; constraint min; limit 1\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nname: constraint; expected string; received ""; constraint min; limit 1\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: {
 			faults: [
 				{
@@ -488,14 +489,14 @@ export const REFUSED_OPTIONS: readonly RefusedOptions[] = Object.freeze([
 		label: 'no stores',
 		options: { name: 'catalogue' },
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nstores: missing; expected object\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nstores: missing; expected object\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: { faults: [{ reason: 'missing', path: ['stores'], expected: 'object' }] },
 	},
 	{
 		label: 'a string for stores',
 		options: { name: 'catalogue', stores: 'abc' },
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nstores: type; expected object; received "abc"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nstores: type; expected object; received "abc"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: {
 			faults: [{ reason: 'type', path: ['stores'], expected: 'object', received: '"abc"' }],
 		},
@@ -504,7 +505,7 @@ export const REFUSED_OPTIONS: readonly RefusedOptions[] = Object.freeze([
 		label: 'a string increment',
 		options: { name: 'catalogue', stores: { books: { increment: 'yes' } } },
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nstores.books.increment: type; expected boolean; received "yes"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nstores.books.increment: type; expected boolean; received "yes"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: {
 			faults: [
 				{
@@ -520,7 +521,7 @@ export const REFUSED_OPTIONS: readonly RefusedOptions[] = Object.freeze([
 		label: 'a numeric key path',
 		options: { name: 'catalogue', stores: { books: { path: 5 } } },
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nstores.books.path: variant; the value matches none of the 2 declared forms; send it exactly as the schema declares, one of: string or array of string\nstores.books.path: type; expected string; received 5\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nstores.books.path: variant; the value matches none of the 2 declared forms; send it exactly as the schema declares, one of: string or array of string\nstores.books.path: type; expected string; received 5\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: {
 			faults: [
 				{ reason: 'variant', path: ['stores', 'books', 'path'], variants: 2 },
@@ -535,7 +536,7 @@ export const REFUSED_OPTIONS: readonly RefusedOptions[] = Object.freeze([
 			stores: { books: { indexes: [{ name: 'byTitle', path: 'title', unique: 'no' }] } },
 		},
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nstores.books.indexes.0.unique: type; expected boolean; received "no"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nstores.books.indexes.0.unique: type; expected boolean; received "no"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: {
 			faults: [
 				{
@@ -551,7 +552,7 @@ export const REFUSED_OPTIONS: readonly RefusedOptions[] = Object.freeze([
 		label: 'an undeclared definition member',
 		options: { name: 'catalogue', stores: { books: { path: 'id', autoIncrement: true } } },
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nstores.books.autoIncrement: extra; this key is not declared, remove it or use a declared key: path, increment, indexes\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nstores.books.autoIncrement: extra; this key is not declared, remove it or use a declared key: path, increment, indexes\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: { faults: [{ reason: 'extra', path: ['stores', 'books', 'autoIncrement'] }] },
 	},
 	{
@@ -561,7 +562,7 @@ export const REFUSED_OPTIONS: readonly RefusedOptions[] = Object.freeze([
 			stores: { books: { path: 'id', autoIncrement: true, increment: 'yes' }, notes: { path: 5 } },
 		},
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nstores.books.increment: type; expected boolean; received "yes"\nstores.books.autoIncrement: extra; this key is not declared, remove it or use a declared key: path, increment, indexes\nstores.notes.path: variant; the value matches none of the 2 declared forms; send it exactly as the schema declares, one of: string or array of string\nstores.notes.path: type; expected string; received 5\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nstores.books.increment: type; expected boolean; received "yes"\nstores.books.autoIncrement: extra; this key is not declared, remove it or use a declared key: path, increment, indexes\nstores.notes.path: variant; the value matches none of the 2 declared forms; send it exactly as the schema declares, one of: string or array of string\nstores.notes.path: type; expected string; received 5\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: {
 			faults: [
 				{
@@ -580,8 +581,8 @@ export const REFUSED_OPTIONS: readonly RefusedOptions[] = Object.freeze([
 		label: 'a class instance as an index definition',
 		options: { name: 'catalogue', stores: { books: { indexes: [new IndexLike()] } } },
 		message:
-			'Database options are not plain JSON data: cloneJSONValue: object is not a plain record',
-		context: { clone: 'cloneJSONValue: object is not a plain record' },
+			'Database options are not plain JSON data: cloneJSONValue: object is not a plain record at stores.books.indexes.0',
+		context: { clone: 'cloneJSONValue: object is not a plain record at stores.books.indexes.0' },
 	},
 	{
 		label: 'an optional member present as undefined',
@@ -589,33 +590,38 @@ export const REFUSED_OPTIONS: readonly RefusedOptions[] = Object.freeze([
 			name: 'catalogue',
 			stores: { books: { indexes: [{ name: 'byTitle', path: 'title', unique: undefined }] } },
 		},
-		message: 'Database options are not plain JSON data: cloneJSONValue: property is not JSON data',
-		context: { clone: 'cloneJSONValue: property is not JSON data' },
+		message:
+			'Database options are not plain JSON data: cloneJSONValue: property is not JSON data at stores.books.indexes.0.unique',
+		context: {
+			clone: 'cloneJSONValue: property is not JSON data at stores.books.indexes.0.unique',
+		},
 	},
 	{
 		label: 'a class instance as a store definition',
 		options: { name: 'catalogue', stores: { books: new StoreLike() } },
 		message:
-			'Database options are not plain JSON data: cloneJSONValue: object is not a plain record',
-		context: { clone: 'cloneJSONValue: object is not a plain record' },
+			'Database options are not plain JSON data: cloneJSONValue: object is not a plain record at stores.books',
+		context: { clone: 'cloneJSONValue: object is not a plain record at stores.books' },
 	},
 	{
 		label: 'a store increment present as undefined',
 		options: { name: 'catalogue', stores: { books: { increment: undefined } } },
-		message: 'Database options are not plain JSON data: cloneJSONValue: property is not JSON data',
-		context: { clone: 'cloneJSONValue: property is not JSON data' },
+		message:
+			'Database options are not plain JSON data: cloneJSONValue: property is not JSON data at stores.books.increment',
+		context: { clone: 'cloneJSONValue: property is not JSON data at stores.books.increment' },
 	},
 	{
 		label: 'a store path present as undefined',
 		options: { name: 'catalogue', stores: { books: { path: undefined } } },
-		message: 'Database options are not plain JSON data: cloneJSONValue: property is not JSON data',
-		context: { clone: 'cloneJSONValue: property is not JSON data' },
+		message:
+			'Database options are not plain JSON data: cloneJSONValue: property is not JSON data at stores.books.path',
+		context: { clone: 'cloneJSONValue: property is not JSON data at stores.books.path' },
 	},
 	{
 		label: 'a string version',
 		options: { name: 'catalogue', version: '2', stores: {} },
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nversion: type; expected integer; received "2"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nversion: type; expected integer; received "2"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: {
 			faults: [{ reason: 'type', path: ['version'], expected: 'integer', received: '"2"' }],
 		},
@@ -624,7 +630,7 @@ export const REFUSED_OPTIONS: readonly RefusedOptions[] = Object.freeze([
 		label: 'a version of zero',
 		options: { name: 'catalogue', version: 0, stores: {} },
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nversion: constraint; expected integer; received 0; constraint min; limit 1\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nversion: constraint; expected integer; received 0; constraint min; limit 1\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: {
 			faults: [
 				{
@@ -642,25 +648,23 @@ export const REFUSED_OPTIONS: readonly RefusedOptions[] = Object.freeze([
 		label: 'an upgrade that is not a function',
 		options: { name: 'catalogue', stores: {}, upgrade: 'migrate' },
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nupgrade: type; expected literal; received "\\"migrate\\""; send one of "function"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nupgrade: type; expected function; received "migrate"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: {
-			faults: [
-				{ reason: 'type', path: ['upgrade'], expected: 'literal', received: '"\\"migrate\\""' },
-			],
+			faults: [{ reason: 'type', path: ['upgrade'], expected: 'function', received: '"migrate"' }],
 		},
 	},
 	{
 		label: 'an undeclared option',
 		options: { name: 'catalogue', stores: {}, durability: 'strict' },
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\ndurability: extra; this key is not declared, remove it or use a declared key: name, version, stores, upgrade\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\ndurability: extra; this key is not declared, remove it or use a declared key: name, version, stores, upgrade\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: { faults: [{ reason: 'extra', path: ['durability'] }] },
 	},
 	{
 		label: 'three malformed options',
 		options: { name: '', stores: 'x', version: 1.5 },
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nname: constraint; expected string; received ""; constraint min; limit 1\nversion: constraint; expected integer; received 1.5; constraint integer\nstores: type; expected object; received "x"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nname: constraint; expected string; received ""; constraint min; limit 1\nversion: constraint; expected integer; received 1.5; constraint integer\nstores: type; expected object; received "x"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: {
 			faults: [
 				{
@@ -686,51 +690,53 @@ export const REFUSED_OPTIONS: readonly RefusedOptions[] = Object.freeze([
 		label: 'the string function as upgrade',
 		options: { name: 'catalogue', stores: {}, upgrade: 'function' },
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nupgrade: type; expected literal; received "\\"function\\""; send one of "function"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nupgrade: type; expected function; received "function"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: {
-			faults: [
-				{ reason: 'type', path: ['upgrade'], expected: 'literal', received: '"\\"function\\""' },
-			],
+			faults: [{ reason: 'type', path: ['upgrade'], expected: 'function', received: '"function"' }],
 		},
 	},
 	{
 		label: 'a null upgrade',
 		options: { name: 'catalogue', stores: {}, upgrade: null },
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nupgrade: type; expected literal; received "null"; send one of "function"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nupgrade: type; expected function; received null\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: {
-			faults: [{ reason: 'type', path: ['upgrade'], expected: 'literal', received: '"null"' }],
+			faults: [{ reason: 'type', path: ['upgrade'], expected: 'function', received: 'null' }],
 		},
 	},
 	{
 		label: 'a numeric upgrade',
 		options: { name: 'catalogue', stores: {}, upgrade: 7 },
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nupgrade: type; expected literal; received "7"; send one of "function"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nupgrade: type; expected function; received 7\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: {
-			faults: [{ reason: 'type', path: ['upgrade'], expected: 'literal', received: '"7"' }],
+			faults: [{ reason: 'type', path: ['upgrade'], expected: 'function', received: '7' }],
 		},
 	},
 	{
 		label: 'an object whose toString returns function as upgrade',
 		options: { name: 'catalogue', stores: {}, upgrade: { toString: () => 'function' } },
 		message:
-			'Database options must match IndexedDBDatabaseOptions:\nupgrade: type; expected literal; received "object"; send one of "function"\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: "function"}',
+			'Database options must match IndexedDBDatabaseOptions:\nupgrade: type; expected function; received object\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
 		context: {
-			faults: [{ reason: 'type', path: ['upgrade'], expected: 'literal', received: '"object"' }],
+			faults: [{ reason: 'type', path: ['upgrade'], expected: 'function', received: 'object' }],
 		},
 	},
 	{
 		label: 'a version present as undefined',
 		options: { name: 'catalogue', stores: {}, version: undefined },
-		message: 'Database options are not plain JSON data: cloneJSONValue: property is not JSON data',
-		context: { clone: 'cloneJSONValue: property is not JSON data' },
+		message:
+			'Database options are not plain JSON data: cloneJSONValue: property is not JSON data at version',
+		context: { clone: 'cloneJSONValue: property is not JSON data at version' },
 	},
 	{
 		label: 'an upgrade present as undefined',
 		options: { name: 'catalogue', stores: {}, upgrade: undefined },
-		message: 'Database options are not plain JSON data: cloneJSONValue: property is not JSON data',
-		context: { clone: 'cloneJSONValue: property is not JSON data' },
+		message:
+			'Database options must match IndexedDBDatabaseOptions:\nupgrade: type; expected function; received undefined\nsend {"name": string (minLength 1), "stores": object of {"path"?: string | array, "increment"?:…, "version"?: integer (minimum 1), "upgrade"?: function}',
+		context: {
+			faults: [{ reason: 'type', path: ['upgrade'], expected: 'function', received: 'undefined' }],
+		},
 	},
 	{
 		label: 'a class instance as options',
@@ -742,8 +748,9 @@ export const REFUSED_OPTIONS: readonly RefusedOptions[] = Object.freeze([
 	{
 		label: 'a version that is not finite',
 		options: { name: 'catalogue', stores: {}, version: Number.NaN },
-		message: 'Database options are not plain JSON data: cloneJSONValue: number is not finite',
-		context: { clone: 'cloneJSONValue: number is not finite' },
+		message:
+			'Database options are not plain JSON data: cloneJSONValue: number is not finite at version',
+		context: { clone: 'cloneJSONValue: number is not finite at version' },
 	},
 ])
 

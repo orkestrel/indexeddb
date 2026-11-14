@@ -1,8 +1,8 @@
 import {
 	arrayShape,
 	booleanShape,
+	functionShape,
 	integerShape,
-	literalShape,
 	objectShape,
 	optionalShape,
 	recordShape,
@@ -82,18 +82,11 @@ export const storeDefinitionShape = objectShape({
 export const indexedDBSchemaShape = recordShape(storeDefinitionShape)
 
 /**
- * Declares the options of `createIndexedDBDatabase` as a closed contract shape, audited with
- * `upgrade` read as its preview, because `@orkestrel/contract` has no shape or fault kind for a
- * function, until contract gains a function shape.
+ * Declares the options of `createIndexedDBDatabase` as a closed contract shape.
  *
  * @remarks
  * `name` is a non-empty string, `version` an optional integer of at least 1, and `stores` an
- * {@link IndexedDBSchema}. This is a stated limit: `@orkestrel/contract` has no shape or fault
- * kind for a function, so the database constructor audits a copy in which `upgrade` is replaced
- * by its `preview`: a function reads `'function'`, which the `upgrade` literal admits, and every
- * other value reads as its own quoted or bare preview, which it refuses. Once contract gains a
- * function shape, which the campaign's contract unit owns, this shape reads `upgrade` as its
- * declared function type. The object is closed, so an undeclared option is refused.
+ * {@link IndexedDBSchema}. `upgrade` is an optional function. The object is closed, so an undeclared option is refused.
  *
  * @example
  * ```ts
@@ -107,5 +100,5 @@ export const indexedDBDatabaseOptionsShape = objectShape({
 	name: stringShape({ min: 1 }),
 	version: optionalShape(integerShape({ min: 1 })),
 	stores: indexedDBSchemaShape,
-	upgrade: optionalShape(literalShape(['function'])),
+	upgrade: optionalShape(functionShape()),
 })

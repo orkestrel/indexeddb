@@ -1551,8 +1551,8 @@ describe('IndexedDBDatabase — the store verb refuses the store-level boundarie
 		[
 			'a class instance',
 			new StoreLike(),
-			'value: type; expected object; received object\nsend {"path"?: string | array of string, "increment"?: boolean, "indexes"?: array of {"name": string, "path": string | array…}',
-			[{ reason: 'type', path: [], expected: 'object', received: 'object' }],
+			'value: type; expected object; received instance\nsend {"path"?: string | array of string, "increment"?: boolean, "indexes"?: array of {"name": string, "path": string | array…}',
+			[{ reason: 'type', path: [], expected: 'object', received: 'instance' }],
 		],
 		[
 			'an increment present as undefined',
@@ -1621,6 +1621,11 @@ describe('IndexedDBDatabase — construction holds the options it admitted', () 
 })
 
 describe('IndexedDBDatabase — construction reads the options once', () => {
+	it('constructs with an empty schema and an upgrade function', () => {
+		const db = createIndexedDBDatabase({ name: 'app', stores: {}, upgrade: () => {} })
+		expect(db.name).toBe('app')
+	})
+
 	it('reads an options getter once on admission', () => {
 		const reads = createRecorder<[string]>()
 		const db = createIndexedDBDatabase(createShiftingOptions(['catalogue'], reads))
@@ -1656,10 +1661,10 @@ describe('IndexedDBDatabase — construction reads the options once', () => {
 		)
 		expect(errorCode(caught)).toBe('DATA')
 		expect(isIndexedDBError(caught) ? caught.message : undefined).toBe(
-			'Database options are not plain JSON data: cloneJSONValue: record property is not enumerable data',
+			'Database options are not plain JSON data: cloneJSONValue: record property is not enumerable data at stores.books.path',
 		)
 		expect(caught).toHaveProperty('context', {
-			clone: 'cloneJSONValue: record property is not enumerable data',
+			clone: 'cloneJSONValue: record property is not enumerable data at stores.books.path',
 		})
 		expect(isIndexedDBError(caught) ? caught.cause : undefined).toHaveProperty('code', 'clone')
 		expect(reads.calls).toEqual([])

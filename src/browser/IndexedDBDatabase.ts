@@ -17,7 +17,6 @@ import {
 	isError,
 	isRecord,
 	isString,
-	isUndefined,
 	preview,
 } from '@orkestrel/contract'
 import { IndexedDBError, isIndexedDBError } from './errors.js'
@@ -81,16 +80,13 @@ export class IndexedDBDatabase<
 
 	constructor(options: IndexedDBDatabaseOptions<Stores>) {
 		// The options are read once, through one copy taken only of a plain record, so a class
-		// instance or a non-record is audited as it arrived. Contract has no function shape, so
-		// `upgrade` is audited as its preview: a function reads 'function'.
+		// instance or a non-record is audited as it arrived. `upgrade` is a function, so only the
+		// rest is cloned, and `upgrade` rejoins the clone for the audit.
 		const read = isRecord(options) ? { ...options } : options
-		const checked =
-			isRecord(read) && !isUndefined(read.upgrade)
-				? { ...read, upgrade: preview(read.upgrade) }
-				: read
+		const { upgrade, ...rest } = isRecord(read) ? read : { upgrade: undefined }
 		// The admitted value is an owned, frozen deep copy, so no later change to the caller's
 		// objects reaches what this handle creates; only it is read afterwards.
-		const owned = attempt(() => cloneJSONRecord(checked))
+		const owned = attempt(() => cloneJSONRecord(isRecord(read) ? rest : read))
 		if (!owned.success) {
 			// A value contract cannot clone, such as one that is not JSON data or that passes its
 			// node limit, is refused with that cause; no caller object is read again.
@@ -102,10 +98,11 @@ export class IndexedDBDatabase<
 				{ clone },
 			)
 		}
-		if (!indexedDBDatabaseOptionsContract.is(owned.value)) {
-			// The audit reads the same owned clone the check refused, so the faults are that
-			// value's, and the audit runs only after the strict check refused.
-			const faults = indexedDBDatabaseOptionsContract.audit(owned.value)
+		const checked = isRecord(read) && 'upgrade' in read ? { ...owned.value, upgrade } : owned.value
+		if (!indexedDBDatabaseOptionsContract.is(checked)) {
+			// The audit reads the same value the check refused, so the faults are that value's, and
+			// the audit runs only after the strict check refused.
+			const faults = indexedDBDatabaseOptionsContract.audit(checked)
 			throw new IndexedDBError(
 				'DATA',
 				`Database options must match IndexedDBDatabaseOptions:\n${describeFaults(faults, indexedDBDatabaseOptionsContract.schema)}`,
@@ -113,9 +110,9 @@ export class IndexedDBDatabase<
 				{ faults },
 			)
 		}
-		this.#name = owned.value.name
-		this.#version = owned.value.version
-		this.#stores = owned.value.stores
+		this.#name = checked.name
+		this.#version = checked.version
+		this.#stores = checked.stores
 		this.#upgrade = read.upgrade
 	}
 
