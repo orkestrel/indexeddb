@@ -13,21 +13,30 @@ import {
 	rangeToKey,
 	readRecord,
 	readRecords,
+	scanIndex,
 	supportsIndexedDB,
 	wrapCall,
 	wrapDOMException,
 } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
+import { INTRINSICS, isObject } from '@orkestrel/contract'
 import { captureError, createTeardown } from '@orkestrel/test'
-import { createTestDatabase, dropDatabase, errorCode, mintDatabase } from '../../setupBrowser.js'
+import {
+	createTestDatabase,
+	dropDatabase,
+	errorCode,
+	MESSAGE_NAMES,
+	mintDatabase,
+	seedNonRecord,
+} from '../../setupBrowser.js'
 
 // The browser surface's helpers (`src/browser/helpers.ts`), exercised in real
 // Chromium: the feature probe `supportsIndexedDB` (the entry gate a consumer
 // runs before entering the rest of this module), the key-range builders
 // asserted on the `IDBKeyRange` bounds they return, the shared read primitives
 // (`readRecord` / `readRecords` / `hasKey`) over a real `IDBObjectStore` /
-// `IDBIndex` reached through a transaction scope — including the `isRecord`
-// boundary that narrows a non-record clone away — the two Promise bridges
+// `IDBIndex` reached through a transaction scope — including the `RECORD` raise
+// for a stored value that is no record — the two Promise bridges
 // (`promisifyRequest` / `promisifyTransaction`) against real requests, both
 // success and the `IndexedDBError`-wrapped rejection, `wrapCall` over each of
 // the three paths it can take (a returned value, a thrown `DOMException`, and a
@@ -38,11 +47,23 @@ import { createTestDatabase, dropDatabase, errorCode, mintDatabase } from '../..
 
 describe('src/browser environment', () => {
 	it('runs in a real browser with a DOM and IndexedDB', () => {
-		expect(typeof document).toBe('object')
-		expect(typeof globalThis.indexedDB).toBe('object')
+		expect(isObject(document)).toBe(true)
+		expect(isObject(globalThis.indexedDB)).toBe(true)
 	})
 
 	it('supportsIndexedDB reports true in the browser', () => {
+		expect(supportsIndexedDB()).toBe(true)
+	})
+
+	it('supportsIndexedDB reports false while indexedDB reads null, and restores the global', () => {
+		const own = INTRINSICS.describe(globalThis, 'indexedDB')
+		INTRINSICS.define(globalThis, 'indexedDB', { value: null, configurable: true })
+		try {
+			expect(supportsIndexedDB()).toBe(false)
+		} finally {
+			if (own === undefined) Reflect.deleteProperty(globalThis, 'indexedDB')
+			else INTRINSICS.define(globalThis, 'indexedDB', own)
+		}
 		expect(supportsIndexedDB()).toBe(true)
 	})
 })
@@ -80,33 +101,69 @@ describe('key-range builders', () => {
 		expect(to.includes(10)).toBe(true)
 	})
 
-	it('prefix bounds every string with the prefix', () => {
+	it('prefix closes at the successor of the prefix, exclusive', () => {
 		const prefix = rangePrefix('user:')
 		expect(prefix.lower).toBe('user:')
 		expect(prefix.lowerOpen).toBe(false)
-		expect(prefix.upperOpen).toBe(false)
+		expect(prefix.upper).toBe('user;')
+		expect(prefix.upperOpen).toBe(true)
 		expect(prefix.includes('user:')).toBe(true)
 		expect(prefix.includes('user:1')).toBe(true)
 		expect(prefix.includes('user:zzz')).toBe(true)
+		expect(prefix.includes('user:\uFFFF')).toBe(true)
+		expect(prefix.includes('user:\uFFFF\uFFFFmore')).toBe(true)
+		expect(prefix.includes('user;')).toBe(false)
 		expect(prefix.includes('uses')).toBe(false)
-		expect(prefix.includes('usep')).toBe(false)
+		expect(prefix.includes('user')).toBe(false)
+	})
+
+	it('prefix drops trailing U+FFFF code units before it increments', () => {
+		const prefix = rangePrefix('a\uFFFF\uFFFF')
+		expect(prefix.lower).toBe('a\uFFFF\uFFFF')
+		expect(prefix.upper).toBe('b')
+		expect(prefix.upperOpen).toBe(true)
+		expect(prefix.includes('a\uFFFF\uFFFF')).toBe(true)
+		expect(prefix.includes('a\uFFFF\uFFFFz')).toBe(true)
+		expect(prefix.includes('a\uFFFF\uFFFE')).toBe(false)
+		expect(prefix.includes('b')).toBe(false)
+	})
+
+	it('prefix with no successor closes below every binary key, so no array or binary key enters', () => {
+		const empty = rangePrefix('')
+		expect(empty.lower).toBe('')
+		expect(empty.lowerOpen).toBe(false)
+		expect(empty.upper).toBeInstanceOf(ArrayBuffer)
+		expect(empty.upperOpen).toBe(true)
+		expect(empty.includes('')).toBe(true)
+		expect(empty.includes('\uFFFF\uFFFF')).toBe(true)
+		expect(empty.includes(new ArrayBuffer(0))).toBe(false)
+		expect(empty.includes([1])).toBe(false)
+		expect(empty.includes(1)).toBe(false)
+
+		const top = rangePrefix('\uFFFF')
+		expect(top.lower).toBe('\uFFFF')
+		expect(top.upper).toBeInstanceOf(ArrayBuffer)
+		expect(top.upperOpen).toBe(true)
+		expect(top.includes('\uFFFF')).toBe(true)
+		expect(top.includes('\uFFFF\uFFFFmore')).toBe(true)
+		expect(top.includes('\uFFFE')).toBe(false)
+		expect(top.includes(new ArrayBuffer(1))).toBe(false)
+		expect(top.includes(['x'])).toBe(false)
 	})
 })
 
 describe('readRecord / readRecords / hasKey — over a real store', () => {
-	it('readRecord returns a record, and narrows a non-record clone to undefined', async () => {
-		const { db, cleanup } = await createTestDatabase({ store: {} })
-		teardown.add(cleanup)
-		await db.write('store', async (transaction) => {
-			const native = transaction.store('store').store
-			await promisifyRequest(native.put({ id: 'r1' }, 'r1'))
-			await promisifyRequest(native.put(42, 'primitive')) // a non-record clone
-		})
-		await db.read('store', async (transaction) => {
-			const native = transaction.store('store').store
-			expect(await readRecord(native, 'r1')).toEqual({ id: 'r1' })
-			expect(await readRecord(native, 'primitive')).toBeUndefined()
+	it('readRecord returns a record, undefined on a miss, and raises RECORD for a non-record', async () => {
+		const db = await seedNonRecord(teardown, 7310)
+		await db.read('books', async (transaction) => {
+			const native = transaction.store('books').store
+			expect(await readRecord(native, 'a')).toEqual({ title: 'Atlas', length: 412 })
 			expect(await readRecord(native, 'missing')).toBeUndefined()
+			const caught = await readRecord(native, 'b').catch((error: unknown) => error)
+			expect(caught).toBeInstanceOf(IndexedDBError)
+			expect(errorCode(caught)).toBe('RECORD')
+			expect(caught).toHaveProperty('context', { store: 'books', key: 'b' })
+			expect(String(caught)).not.toContain('7310')
 		})
 	})
 
@@ -122,20 +179,33 @@ describe('readRecord / readRecords / hasKey — over a real store', () => {
 		})
 	})
 
-	it('readRecords keeps only records and honours a key range and count', async () => {
-		const { db, cleanup } = await createTestDatabase({ store: {} })
-		teardown.add(cleanup)
-		await db.write('store', async (transaction) => {
-			const native = transaction.store('store').store
-			await promisifyRequest(native.put({ id: 'a' }, 'a'))
-			await promisifyRequest(native.put(7, 'b')) // a non-record clone, dropped
-			await promisifyRequest(native.put({ id: 'c' }, 'c'))
+	it('readRecords honours a key range and count, and raises RECORD naming the key the pair reads', async () => {
+		const db = await seedNonRecord(teardown, 7310)
+		await db.read('books', async (transaction) => {
+			const native = transaction.store('books').store
+			expect(await readRecords(native, undefined, 1)).toEqual([{ title: 'Atlas', length: 412 }])
+			expect(await readRecords(native, rangeFromKey('c'))).toEqual([{ title: 'Codex', length: 96 }])
+			const caught = await readRecords(native).catch((error: unknown) => error)
+			expect(caught).toBeInstanceOf(IndexedDBError)
+			expect(errorCode(caught)).toBe('RECORD')
+			expect(caught).toHaveProperty('context', { store: 'books', key: 'b' })
+			expect(String(caught)).not.toContain('7310')
 		})
-		await db.read('store', async (transaction) => {
-			const native = transaction.store('store').store
-			expect(await readRecords(native)).toEqual([{ id: 'a' }, { id: 'c' }])
-			expect(await readRecords(native, undefined, 1)).toEqual([{ id: 'a' }])
-			expect(await readRecords(native, rangeFromKey('c'))).toEqual([{ id: 'c' }])
+	})
+
+	it('readRecord and readRecords raise RECORD naming the store, index, and primary key over an index', async () => {
+		const db = await seedNonRecord(teardown, 'xyz')
+		await db.read('books', async (transaction) => {
+			const index = transaction.store('books').store.index('byLength')
+			expect(await readRecord(index, 96)).toEqual({ title: 'Codex', length: 96 })
+			const point = await readRecord(index, 3).catch((error: unknown) => error)
+			expect(errorCode(point)).toBe('RECORD')
+			expect(point).toHaveProperty('context', { store: 'books', index: 'byLength', key: 'b' })
+			expect(String(point)).not.toContain('xyz')
+			const bulk = await readRecords(index).catch((error: unknown) => error)
+			expect(errorCode(bulk)).toBe('RECORD')
+			expect(bulk).toHaveProperty('context', { store: 'books', index: 'byLength', key: 'b' })
+			expect(String(bulk)).not.toContain('xyz')
 		})
 	})
 
@@ -166,6 +236,23 @@ describe('readRecord / readRecords / hasKey — over a real store', () => {
 			expect(await hasKey(native, 'x')).toBe(true)
 			expect(await hasKey(native, 'nope')).toBe(false)
 		})
+	})
+})
+
+describe('readRecord — the index point read pair beside the caller writes', () => {
+	it('names the primary key the pair read when the caller removes that entry after a read queued behind', async () => {
+		const db = await seedNonRecord(teardown, 'wxyz')
+		const outcome = Promise.withResolvers<unknown>()
+		await db.write('books', async (transaction) => {
+			const native = transaction.store('books').store
+			const read = readRecord(native.index('byLength'), 4).catch((error: unknown) => error)
+			await readRecord(native, 'a')
+			await promisifyRequest(native.delete('b'))
+			outcome.resolve(await read)
+		})
+		const caught = await outcome.promise
+		expect(errorCode(caught)).toBe('RECORD')
+		expect(caught).toHaveProperty('context', { store: 'books', index: 'byLength', key: 'b' })
 	})
 })
 
@@ -215,6 +302,39 @@ describe('createIndex — index-DDL leaf', () => {
 			words: ['a', 'b'],
 		})
 		await promisifyTransaction(check)
+	})
+})
+
+describe('scanIndex — a stored index against its declaration', () => {
+	it('returns no difference for the index createIndex built, and names each differing member', async () => {
+		const { db, cleanup } = await createTestDatabase({
+			tags: {
+				path: 'id',
+				indexes: [
+					{ name: 'byLabel', path: 'label', unique: true },
+					{ name: 'byWord', path: 'words', multiple: true },
+					{ name: 'byPair', path: ['make', 'model'] },
+				],
+			},
+		})
+		teardown.add(cleanup)
+		await db.read('tags', (transaction) => {
+			const store = transaction.store('tags').store
+			const byLabel = store.index('byLabel')
+			const byWord = store.index('byWord')
+			const byPair = store.index('byPair')
+			expect(scanIndex(byLabel, { name: 'byLabel', path: 'label', unique: true })).toEqual([])
+			expect(scanIndex(byWord, { name: 'byWord', path: 'words', multiple: true })).toEqual([])
+			expect(scanIndex(byPair, { name: 'byPair', path: ['make', 'model'] })).toEqual([])
+			expect(scanIndex(byLabel, { name: 'byLabel', path: 'title' })).toEqual(['path', 'unique'])
+			expect(scanIndex(byLabel, { name: 'byLabel', path: ['label'], unique: true })).toEqual([
+				'path',
+			])
+			expect(scanIndex(byWord, { name: 'byWord', path: 'words' })).toEqual(['multiple'])
+			expect(scanIndex(byPair, { name: 'byPair', path: ['model', 'make'] })).toEqual(['path'])
+			expect(scanIndex(byPair, { name: 'byPair', path: ['make'] })).toEqual(['path'])
+			expect(scanIndex(byPair, { name: 'byPair', path: 'make' })).toEqual(['path'])
+		})
 	})
 })
 
@@ -295,7 +415,7 @@ describe('wrapCall — synchronous native call boundary', () => {
 		})
 		expect(caught).toBeInstanceOf(IndexedDBError)
 		expect(errorCode(caught)).toBe('INACTIVE')
-		expect(caught instanceof IndexedDBError ? caught.cause : undefined).toBe(native)
+		expect(isIndexedDBError(caught) ? caught.cause : undefined).toBe(native)
 	})
 
 	it('rethrows a throw that is not a DOMException by identity', () => {
@@ -378,4 +498,34 @@ describe('isIndexedDBError — type guard', () => {
 		expect(isIndexedDBError('IndexedDBError')).toBe(false)
 		expect(isIndexedDBError(undefined)).toBe(false)
 	})
+})
+
+describe('buildRecordError — the store and index names through preview', () => {
+	it.for(MESSAGE_NAMES)(
+		'names the store and the index a value was read from ($shown)',
+		async ({ name, shown }) => {
+			const { db, cleanup } = await createTestDatabase({
+				[name]: { indexes: [{ name, path: 'length' }] },
+			})
+			teardown.add(cleanup)
+			await db.write(name, async (transaction) => {
+				await promisifyRequest(transaction.store(name).store.put('xyz', 'b'))
+			})
+			const point = await db
+				.store(name)
+				.index(name)
+				.get(3)
+				.catch((error: unknown) => error)
+			expect(isIndexedDBError(point) ? point.message : undefined).toBe(
+				`Stored value is not a record (store ${shown}, index ${shown}, key "b"); rewrite or remove the entry`,
+			)
+			const stored = await db
+				.store(name)
+				.get('b')
+				.catch((error: unknown) => error)
+			expect(isIndexedDBError(stored) ? stored.message : undefined).toBe(
+				`Stored value is not a record (store ${shown}, key "b"); rewrite or remove the entry`,
+			)
+		},
+	)
 })

@@ -1,6 +1,6 @@
 import type { IndexedDBCursorInterface, StoreRecord } from './types.js'
 import { isRecord } from '@orkestrel/contract'
-import { promisifyRequest, wrapCall } from './helpers.js'
+import { buildRecordError, promisifyRequest, wrapCall } from './helpers.js'
 
 /**
  * Represents a promisified value cursor over an object store or index.
@@ -8,9 +8,10 @@ import { promisifyRequest, wrapCall } from './helpers.js'
  * @remarks
  * Wraps `IDBCursorWithValue` and the request that drives it. The position
  * (`key` / `primary` / `value`) is snapshot at construction because IndexedDB
- * mutates the live cursor object in place on each advance. `value` narrows the
- * stored value with `isRecord` and is `undefined` when that value is not a
- * record, the same absence `readRecord` reports. `continue` / `seek` /
+ * mutates the live cursor object in place on each advance. `value` checks the
+ * snapshot with `isRecord` when read and raises `RECORD` for a value that is no
+ * record; no other member reads the value, so `remove` still deletes that
+ * entry. `continue` / `seek` /
  * `advance` re-arm the shared request and resolve to the next position (a fresh
  * `IndexedDBCursor`) or `null` at the end. `update` / `remove` act on the current
  * record — they require the cursor's transaction to be `readwrite` (a `store`
@@ -33,7 +34,7 @@ export class IndexedDBCursor implements IndexedDBCursorInterface {
 	readonly #request: IDBRequest<IDBCursorWithValue | null>
 	readonly #key: IDBValidKey
 	readonly #primary: IDBValidKey
-	#value: StoreRecord | undefined
+	#value: unknown
 	readonly #direction: IDBCursorDirection
 
 	constructor(cursor: IDBCursorWithValue, request: IDBRequest<IDBCursorWithValue | null>) {
@@ -41,7 +42,7 @@ export class IndexedDBCursor implements IndexedDBCursorInterface {
 		this.#request = request
 		this.#key = cursor.key
 		this.#primary = cursor.primaryKey
-		this.#value = isRecord(cursor.value) ? cursor.value : undefined
+		this.#value = cursor.value
 		this.#direction = cursor.direction
 	}
 
@@ -61,8 +62,9 @@ export class IndexedDBCursor implements IndexedDBCursorInterface {
 		return this.#primary
 	}
 
-	get value(): StoreRecord | undefined {
-		return this.#value
+	get value(): StoreRecord {
+		if (isRecord(this.#value)) return this.#value
+		throw buildRecordError(this.#cursor.source, this.#primary)
 	}
 
 	get direction(): IDBCursorDirection {

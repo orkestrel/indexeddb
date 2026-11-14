@@ -7,7 +7,7 @@ import type {
 	StoreRecord,
 	StoreDefinition,
 } from './types.js'
-import { isArray } from '@orkestrel/contract'
+import { isArray, preview } from '@orkestrel/contract'
 import { IndexedDBError } from './errors.js'
 import { promisifyTransaction, wrapCall } from './helpers.js'
 import { IndexedDBIndex } from './IndexedDBIndex.js'
@@ -170,7 +170,7 @@ export class IndexedDBStore implements IndexedDBStoreInterface {
 		if (definition === undefined) {
 			throw new IndexedDBError(
 				'NOT_FOUND',
-				`Index '${name}' is not declared on store '${this.#name}'`,
+				`Index ${preview(name)} is not declared on store ${preview(this.#name)}`,
 				undefined,
 				{ store: this.#name, index: name },
 			)

@@ -13,7 +13,8 @@ import { IndexedDBDatabase } from './IndexedDBDatabase.js'
  * and `db.read` / `db.write` are checked against the declared stores. Stores are
  * created from their definitions the first time the database opens at a new
  * `version`; omit `version` for auto-managed mode, where the database bumps its
- * own version once to create any declared store the stored schema is missing.
+ * own version once to create any declared store or index the stored schema is
+ * missing.
  *
  * @param options - The database `name`, `version`, and `stores` schema
  * @returns A typed {@link IndexedDBDatabaseInterface}

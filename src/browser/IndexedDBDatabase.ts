@@ -8,9 +8,31 @@ import type {
 	IndexDefinition,
 	StoreDefinition,
 } from './types.js'
-import { isArray, isInteger, isRecord, isString } from '@orkestrel/contract'
-import { IndexedDBError } from './errors.js'
-import { createIndex, promisifyTransaction, wrapCall } from './helpers.js'
+import {
+	attempt,
+	cloneJSONRecord,
+	describeFaults,
+	isArray,
+	isEmptyArray,
+	isError,
+	isRecord,
+	isString,
+	isUndefined,
+	preview,
+} from '@orkestrel/contract'
+import { IndexedDBError, isIndexedDBError } from './errors.js'
+import {
+	indexDefinitionContract,
+	indexedDBDatabaseOptionsContract,
+	storeDefinitionContract,
+} from './contracts.js'
+import {
+	createIndex,
+	promisifyTransaction,
+	scanIndex,
+	wrapCall,
+	wrapDOMException,
+} from './helpers.js'
 import { IndexedDBStore } from './IndexedDBStore.js'
 import { IndexedDBTransaction } from './IndexedDBTransaction.js'
 import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
@@ -21,7 +43,8 @@ import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
  * @remarks
  * Connects lazily on first use (`connect`, also awaited internally by every store
  * operation), creating any missing stores from their definitions inside
- * `onupgradeneeded`. `store` reaches a typed store; `read` / `write` run an atomic
+ * `onupgradeneeded`, and, after the custom `upgrade` callback, each declared index
+ * an existing store lacks, refusing a declared index whose stored definition differs. `store` reaches a typed store; `read` / `write` run an atomic
  * scope over one or more stores, committing on resolve and rolling back on a throw;
  * `close` releases the connection and `drop` deletes the database. The built-in
  * schema pass and custom `upgrade` callback share one failure boundary: a fault
@@ -50,33 +73,57 @@ export class IndexedDBDatabase<
 > implements IndexedDBDatabaseInterface<Stores> {
 	readonly #name: string
 	readonly #version: number | undefined
-	readonly #stores: Stores
+	readonly #stores: IndexedDBSchema
 	readonly #upgrade: ((context: IndexedDBUpgradeContext) => void | Promise<void>) | undefined
 	#database: IDBDatabase | undefined
 	readonly #opens = new Set<Promise<IDBDatabase>>()
 	#closed = false
 
 	constructor(options: IndexedDBDatabaseOptions<Stores>) {
-		if (options.name.length === 0) {
-			throw new IndexedDBError('OPEN', 'Database name must be a non-empty string')
-		}
-		if (options.version !== undefined && (!isInteger(options.version) || options.version < 1)) {
+		// The options are read once, through one copy taken only of a plain record, so a class
+		// instance or a non-record is audited as it arrived. Contract has no function shape, so
+		// `upgrade` is audited as its preview: a function reads 'function'.
+		const read = isRecord(options) ? { ...options } : options
+		const checked =
+			isRecord(read) && !isUndefined(read.upgrade)
+				? { ...read, upgrade: preview(read.upgrade) }
+				: read
+		// The admitted value is an owned, frozen deep copy, so no later change to the caller's
+		// objects reaches what this handle creates; only it is read afterwards.
+		const owned = attempt(() => cloneJSONRecord(checked))
+		if (!owned.success) {
+			// A value contract cannot clone, such as one that is not JSON data or that passes its
+			// node limit, is refused with that cause; no caller object is read again.
+			const clone = isError(owned.error) ? owned.error.message : String(owned.error)
 			throw new IndexedDBError(
-				'OPEN',
-				`Database version must be a positive integer, got ${String(options.version)}`,
+				'DATA',
+				`Database options are not plain JSON data: ${clone}`,
+				owned.error,
+				{ clone },
 			)
 		}
-		this.#name = options.name
-		this.#version = options.version
-		this.#stores = options.stores
-		this.#upgrade = options.upgrade
+		if (!indexedDBDatabaseOptionsContract.is(owned.value)) {
+			// The audit reads the same owned clone the check refused, so the faults are that
+			// value's, and the audit runs only after the strict check refused.
+			const faults = indexedDBDatabaseOptionsContract.audit(owned.value)
+			throw new IndexedDBError(
+				'DATA',
+				`Database options must match IndexedDBDatabaseOptions:\n${describeFaults(faults, indexedDBDatabaseOptionsContract.schema)}`,
+				undefined,
+				{ faults },
+			)
+		}
+		this.#name = owned.value.name
+		this.#version = owned.value.version
+		this.#stores = owned.value.stores
+		this.#upgrade = read.upgrade
 	}
 
 	get database(): IDBDatabase {
 		if (this.#database === undefined) {
 			throw new IndexedDBError(
 				'NOT_OPEN',
-				`Database '${this.#name}' is not open — call connect() first`,
+				`Database ${preview(this.#name)} is not open — call connect() first`,
 			)
 		}
 		return this.#database
@@ -101,7 +148,7 @@ export class IndexedDBDatabase<
 
 	connect(): Promise<IDBDatabase> {
 		if (this.#closed) {
-			throw new IndexedDBError('CLOSED', `Database '${this.#name}' has been closed`)
+			throw new IndexedDBError('CLOSED', `Database ${preview(this.#name)} has been closed`)
 		}
 		if (this.#database !== undefined) return Promise.resolve(this.#database)
 		const [opening] = this.#opens
@@ -120,7 +167,7 @@ export class IndexedDBDatabase<
 		if (definition === undefined) {
 			throw new IndexedDBError(
 				'NOT_FOUND',
-				`Store '${name}' is not declared on database '${this.#name}'`,
+				`Store ${preview(name)} is not declared on database ${preview(this.#name)}`,
 				undefined,
 				{ database: this.#name, store: name },
 			)
@@ -156,7 +203,11 @@ export class IndexedDBDatabase<
 			request.addEventListener('success', () => resolve())
 			request.addEventListener('error', () =>
 				reject(
-					new IndexedDBError('UNKNOWN', `Failed to delete database '${this.#name}'`, request.error),
+					new IndexedDBError(
+						'UNKNOWN',
+						`Failed to delete database ${preview(this.#name)}`,
+						request.error,
+					),
 				),
 			)
 		})
@@ -203,9 +254,7 @@ export class IndexedDBDatabase<
 	async #open(): Promise<IDBDatabase> {
 		const initial = this.#accept(await this.#request(this.#version))
 		const database =
-			this.#version === undefined && this.#missing(initial).length > 0
-				? await this.#replace(initial)
-				: initial
+			this.#version === undefined && this.#stale(initial) ? await this.#replace(initial) : initial
 		// Browser-initiated closure retires the stored connection so a later call reconnects.
 		database.onclose = this.#clearConnection.bind(this, database)
 		// Self-initiated closure emits no close event, so versionchange also retires the connection.
@@ -223,7 +272,7 @@ export class IndexedDBDatabase<
 	#accept(database: IDBDatabase): IDBDatabase {
 		if (this.#closed) {
 			database.close()
-			throw new IndexedDBError('CLOSED', `Database '${this.#name}' has been closed`)
+			throw new IndexedDBError('CLOSED', `Database ${preview(this.#name)} has been closed`)
 		}
 		return database
 	}
@@ -234,54 +283,47 @@ export class IndexedDBDatabase<
 			// Presence is separate from the cause value because JavaScript permits
 			// both `throw undefined` and `Promise.reject(undefined)`.
 			const failure = new AbortController()
+			// Aborted when `upgradeneeded` fires, so an open that errors afterwards reads as a
+			// failed upgrade rather than a failed open.
+			const upgrading = new AbortController()
 			const request =
 				version === undefined
 					? globalThis.indexedDB.open(this.#name)
 					: globalThis.indexedDB.open(this.#name, version)
 			request.addEventListener('upgradeneeded', (event) => {
+				upgrading.abort()
 				const database = request.result
 				const transaction = request.transaction
+				const target = database.version
 				if (transaction === null) {
 					failure.abort({
 						cause: new IndexedDBError(
 							'UPGRADE',
-							`Upgrade of '${this.#name}' has no versionchange transaction`,
+							`Upgrade of ${preview(this.#name)} has no versionchange transaction`,
 						),
 					})
 					return
 				}
 
-				// Built-in construction and the custom callback are one atomic
-				// upgrade phase, so every synchronous schema fault reaches the same
-				// typed boundary and prevents the custom phase from running.
+				// Built-in construction, the custom callback, and the built-in index pass
+				// are one atomic upgrade phase, so every schema fault reaches the same
+				// typed boundary. The index pass runs after the callback, so it finds a
+				// declared index the callback created rather than colliding with it.
 				try {
 					for (const [name, definition] of Object.entries(this.#stores)) {
 						if (!database.objectStoreNames.contains(name)) {
 							this.#createUpgradeStore(database, name, definition)
 						}
 					}
-					if (this.#upgrade !== undefined) {
-						const result = this.#upgrade(this.#context(database, transaction, event))
-						if (result !== undefined) {
-							result.catch((error: unknown) => {
-								failure.abort({ cause: error })
-								try {
-									transaction.abort()
-								} catch {
-									// Custom code may already have settled or aborted the transaction
-									// before its rejection reaches this continuation.
-								}
-							})
-						}
+					const result = this.#upgrade?.(this.#context(database, transaction, event))
+					if (result === undefined) this.#reconcile(database, transaction, target)
+					else {
+						result
+							.then(() => this.#reconcile(database, transaction, target))
+							.catch((error: unknown) => this.#fail(failure, transaction, error))
 					}
 				} catch (error) {
-					failure.abort({ cause: error })
-					try {
-						transaction.abort()
-					} catch {
-						// Custom code may already have aborted the transaction before
-						// throwing; the failure recorded first remains authoritative.
-					}
+					this.#fail(failure, transaction, error)
 				}
 			})
 			request.addEventListener('success', () => {
@@ -290,33 +332,91 @@ export class IndexedDBDatabase<
 					return
 				}
 				request.result.close()
-				const reason: unknown = failure.signal.reason
-				reject(
-					new IndexedDBError(
-						'UPGRADE',
-						`Upgrade of '${this.#name}' failed`,
-						isRecord(reason) ? reason.cause : undefined,
-					),
-				)
+				reject(this.#upgradeError(failure.signal.reason))
 			})
 			request.addEventListener('error', () => {
-				const reason: unknown = failure.signal.reason
-				reject(
-					failure.signal.aborted
-						? new IndexedDBError(
-								'UPGRADE',
-								`Upgrade of '${this.#name}' failed`,
-								isRecord(reason) ? reason.cause : undefined,
-							)
-						: new IndexedDBError('OPEN', `Failed to open database '${this.#name}'`, request.error),
-				)
+				if (failure.signal.aborted) reject(this.#upgradeError(failure.signal.reason))
+				else if (upgrading.signal.aborted) {
+					reject(this.#upgradeError({ cause: wrapDOMException(request.error) }))
+				} else {
+					reject(
+						new IndexedDBError(
+							'OPEN',
+							`Failed to open database ${preview(this.#name)}`,
+							request.error,
+						),
+					)
+				}
 			})
 		})
 	}
 
-	// Declared stores the open database does not yet contain.
-	#missing(database: IDBDatabase): readonly string[] {
-		return Object.keys(this.#stores).filter((name) => !database.objectStoreNames.contains(name))
+	// Whether the open database lacks a declared store or a declared index, or holds a
+	// declared index whose definition differs, read through one readonly transaction.
+	#stale(database: IDBDatabase): boolean {
+		const names = Object.keys(this.#stores)
+		if (names.some((name) => !database.objectStoreNames.contains(name))) return true
+		const indexed = names.filter((name) => !isEmptyArray(this.#stores[name]?.indexes ?? []))
+		if (isEmptyArray(indexed)) return false
+		const transaction = wrapCall(() => database.transaction(indexed, 'readonly'))
+		return indexed.some((name) => {
+			const store = transaction.objectStore(name)
+			return (this.#stores[name]?.indexes ?? []).some(
+				(index) =>
+					!store.indexNames.contains(index.name) ||
+					!isEmptyArray(scanIndex(store.index(index.name), index)),
+			)
+		})
+	}
+
+	// After the custom callback: create each declared index an existing declared store
+	// lacks, and refuse one whose stored definition differs. A store the callback dropped
+	// is left absent, and no index is dropped. A callback that aborted the transaction
+	// reverted the connection to its prior version, so the pass then has nothing to do.
+	#reconcile(database: IDBDatabase, transaction: IDBTransaction, target: number): void {
+		if (database.version !== target) return
+		for (const [name, definition] of Object.entries(this.#stores)) {
+			if (!database.objectStoreNames.contains(name)) continue
+			const store = wrapCall(() => transaction.objectStore(name))
+			for (const index of definition.indexes ?? []) {
+				if (!store.indexNames.contains(index.name)) {
+					wrapCall(() => createIndex(store, index))
+					continue
+				}
+				const differs = scanIndex(store.index(index.name), index)
+				if (!isEmptyArray(differs)) {
+					throw new IndexedDBError(
+						'UPGRADE',
+						`Index ${preview(index.name)} on store ${preview(name)} differs from its declaration in ${differs.join(', ')}; drop it in an upgrade callback or match the declaration to it`,
+						undefined,
+						{ store: name, index: index.name },
+					)
+				}
+			}
+		}
+	}
+
+	// The UPGRADE rejection for a recorded failure: its cause is the initiating value, and
+	// a typed cause's context is copied up so a caller reads it without walking the chain.
+	#upgradeError(reason: unknown): IndexedDBError {
+		const cause: unknown = isRecord(reason) ? reason.cause : undefined
+		return new IndexedDBError(
+			'UPGRADE',
+			`Upgrade of ${preview(this.#name)} failed`,
+			cause,
+			isIndexedDBError(cause) ? cause.context : undefined,
+		)
+	}
+
+	// Record the first failure of an upgrade and roll its transaction back.
+	#fail(failure: AbortController, transaction: IDBTransaction, error: unknown): void {
+		failure.abort({ cause: error })
+		try {
+			transaction.abort()
+		} catch {
+			// Custom code may already have settled or aborted the transaction; the
+			// failure recorded first remains authoritative.
+		}
 	}
 
 	// Build the upgrade context passed to `options.upgrade`, after the built-in
@@ -354,6 +454,15 @@ export class IndexedDBDatabase<
 	}
 
 	#createUpgradeStore(database: IDBDatabase, name: string, definition: StoreDefinition): void {
+		if (!storeDefinitionContract.is(definition)) {
+			const faults = storeDefinitionContract.audit(definition)
+			throw new IndexedDBError(
+				'DATA',
+				`Store ${preview(name)} is not a StoreDefinition:\n${describeFaults(faults, storeDefinitionContract.schema)}`,
+				undefined,
+				{ store: name, faults },
+			)
+		}
 		wrapCall(() => this.#createStore(database, name, definition))
 	}
 
@@ -370,6 +479,15 @@ export class IndexedDBDatabase<
 		store: string,
 		definition: IndexDefinition,
 	): void {
+		if (!indexDefinitionContract.is(definition)) {
+			const faults = indexDefinitionContract.audit(definition)
+			throw new IndexedDBError(
+				'DATA',
+				`Index definition for store ${preview(store)} is not an IndexDefinition:\n${describeFaults(faults, indexDefinitionContract.schema)}`,
+				undefined,
+				{ store, faults },
+			)
+		}
 		wrapCall(() => createIndex(transaction.objectStore(store), definition))
 	}
 

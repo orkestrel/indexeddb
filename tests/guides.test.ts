@@ -205,7 +205,7 @@ await new GuideCommand({
 		})
 
 		it('carries the cursor-streaming fence lines the transcription copies', () => {
-			expect(guideText).toContain('if (cursor.value?.active === false) await cursor.remove()')
+			expect(guideText).toContain('if (cursor.value.active === false) await cursor.remove()')
 			expect(guideText).toContain('cursor = await cursor.continue()')
 		})
 
@@ -254,9 +254,7 @@ await new GuideCommand({
 
 		it('carries the typed-fault fence lines the transcription copies', () => {
 			expect(guideText).toContain("await db.store('users').add({ id: 'u1', name: 'Ada' })")
-			expect(guideText).toContain(
-				"if (error instanceof IndexedDBError && error.code === 'CONSTRAINT') {",
-			)
+			expect(guideText).toContain("if (isIndexedDBError(error) && error.code === 'CONSTRAINT') {")
 			expect(guideText).toContain("await db.store('users').set({ id: 'u1', name: 'Ada' })")
 		})
 

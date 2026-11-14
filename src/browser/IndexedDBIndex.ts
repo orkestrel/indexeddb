@@ -6,7 +6,7 @@ import type {
 	KeyPath,
 	StoreRecord,
 } from './types.js'
-import { isArray } from '@orkestrel/contract'
+import { isArray, preview } from '@orkestrel/contract'
 import { IndexedDBError } from './errors.js'
 import { hasKey, promisifyRequest, readRecord, readRecords, wrapCall } from './helpers.js'
 import { IndexedDBCursor } from './IndexedDBCursor.js'
@@ -147,7 +147,7 @@ export class IndexedDBIndex implements IndexedDBIndexInterface {
 		if (value === undefined) {
 			throw new IndexedDBError(
 				'NOT_FOUND',
-				`No record in index '${this.#name}' of store '${this.#store}' for key ${String(key)}`,
+				`No record in index ${preview(this.#name)} of store ${preview(this.#store)} for key ${preview(key)}`,
 				undefined,
 				{ store: this.#store, index: this.#name, key },
 			)

@@ -4,7 +4,7 @@ import type {
 	IndexedDBTransactionStoreInterface,
 	StoreRecord,
 } from './types.js'
-import { isArray } from '@orkestrel/contract'
+import { isArray, preview } from '@orkestrel/contract'
 import { IndexedDBError } from './errors.js'
 import { hasKey, promisifyRequest, readRecord, readRecords, wrapCall } from './helpers.js'
 import { IndexedDBCursor } from './IndexedDBCursor.js'
@@ -159,7 +159,7 @@ export class IndexedDBTransactionStore implements IndexedDBTransactionStoreInter
 		if (value === undefined) {
 			throw new IndexedDBError(
 				'NOT_FOUND',
-				`No record in store '${this.#name}' for key ${String(key)}`,
+				`No record in store ${preview(this.#name)} for key ${preview(key)}`,
 				undefined,
 				{ store: this.#name, key },
 			)

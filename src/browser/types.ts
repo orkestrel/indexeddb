@@ -1,15 +1,13 @@
-// The lean browser-native IndexedDB surface — a typed, Promise-based wrapper over
-// the raw `IDBDatabase` / `IDBObjectStore` / `IDBIndex` / `IDBTransaction` API.
-// There is no cross-environment database layer in this package — no query /
-// filter / sort / aggregate builder here, only what raw IndexedDB offers
-// natively: object stores, secondary indexes, native key ranges, cursors, and
-// native multi-store transactions. Types are the source of truth
-// (`AGENTS.md` § TTTDD).
+// The browser-native IndexedDB surface: a typed, Promise-based wrapper over the raw
+// `IDBDatabase` / `IDBObjectStore` / `IDBIndex` / `IDBTransaction` API, and nothing beyond
+// what IndexedDB answers natively: object stores, secondary indexes, native key ranges,
+// cursors, and native multi-store transactions. It holds no query, filter, sort, or
+// aggregate engine; `@orkestrel/database` runs that engine only over the residual its
+// `DriverInterface` native-first rule leaves, so this wrapper adds none.
 //
-// Values are this package's own `StoreRecord` (a record), narrowed from IndexedDB's
-// structured clone with `isRecord` at the read boundary — an `as`-free bridge.
-// Keys are the full native `IDBValidKey`, so the wrapper speaks IndexedDB's
-// whole key space.
+// Values are this package's own `StoreRecord`, checked with `isRecord` at the read boundary,
+// where a stored value that is no record raises `RECORD`. Keys are the full native
+// `IDBValidKey`, so the wrapper speaks IndexedDB's whole key space.
 
 // === StoreRecord
 
@@ -18,8 +16,9 @@
  *
  * @remarks
  * The value shape every store / index / transaction-store CRUD method reads and
- * writes. A structured-clone value narrowed with `isRecord` at the read
- * boundary (see `helpers.ts`), never an unchecked cast.
+ * writes. A structured-clone value checked with `isRecord` at the read
+ * boundary (see `helpers.ts`), never an unchecked cast: a stored value that is
+ * no record raises `RECORD` rather than reading as a record or as absent.
  */
 export type StoreRecord = Record<string, unknown>
 
@@ -32,8 +31,16 @@ export type StoreRecord = Record<string, unknown>
  * Each maps from a native `DOMException.name` or a wrapper-lifecycle fault:
  * `NOT_OPEN` (used before `connect`), `CLOSED` (used after `close`), `NOT_FOUND`
  * (a `resolve` miss), `CONSTRAINT` (a unique-key violation), `QUOTA` (storage
- * full), `ABORTED` (a transaction rolled back), `DATA` (an invalid key or an
- * un-clonable value — native `DataError` and `DataCloneError` both map here),
+ * full), `ABORTED` (a transaction rolled back), `DATA` (a malformed caller argument,
+ * from two origins: native `DataError` and `DataCloneError`, an invalid key or an
+ * un-clonable value, which ride as `cause`; and the wrapper's own refusal of a malformed
+ * argument, which carries `context`: a database constructor refusal carries `{ faults }`
+ * for every malformed option at once, among options that are JSON data, or `{ clone }` with
+ * the contract clone error as `cause` when the options are not JSON data contract can clone
+ * (a stated limit: that cause names the failure but not the member's path, and one member that
+ * is not JSON data hides the faults of every other option, until contract's clone error carries
+ * a path, which the campaign's contract unit owns); `context.stores.create` and
+ * `context.indexes.create` carry `{ store, faults }`),
  * `OPEN` / `UPGRADE` (a failed open or schema upgrade), `INACTIVE` (the
  * transaction went inactive — IndexedDB's auto-commit fault, raised when an
  * operation runs after a non-IDB `await` deactivated its transaction — reachable through
@@ -45,8 +52,11 @@ export type StoreRecord = Record<string, unknown>
  * similarly invalid native handle; not cleanly reachable through this
  * wrapper's public API, which always opens a fresh transaction or routes
  * through the auto-commit-guarded {@link IndexedDBTransactionStoreInterface}),
- * and `UNKNOWN` (any
- * unmapped fault).
+ * `RECORD` (a stored value that is no record, raised by `get`, `resolve`,
+ * `records`, and a cursor's `value`; its `context` names the `store`, the `index`
+ * on an index read, and the primary `key` where the read names one, and never the
+ * stored value; `key` is absent when the value left before its key was read), and
+ * `UNKNOWN` (any unmapped fault).
  */
 export type IndexedDBErrorCode =
 	| 'NOT_OPEN'
@@ -61,6 +71,7 @@ export type IndexedDBErrorCode =
 	| 'INACTIVE'
 	| 'READONLY'
 	| 'INVALID'
+	| 'RECORD'
 	| 'UNKNOWN'
 
 // === Schema
@@ -80,7 +91,9 @@ export type KeyPath = string | readonly string[]
  * @remarks
  * `name` identifies the index for `store.index(name)`; `path` is the field(s) it
  * indexes; `unique` enforces one record per indexed value; `multiple` (IndexedDB's
- * `multiEntry`) indexes each element of an array value separately.
+ * `multiEntry`) indexes each element of an array value separately. A definition is a
+ * plain record whose optional members are absent: `indexDefinitionContract` refuses an
+ * undeclared member, an optional member present as `undefined`, and a class instance.
  */
 export interface IndexDefinition {
 	readonly name: string
@@ -97,7 +110,10 @@ export interface IndexDefinition {
  * `path` is the in-line key path (omit it for an **out-of-line** store, where the
  * key is passed explicitly to `set` / `add`); `increment` auto-generates numeric
  * keys; `indexes` declares secondary indexes.
- * Stores are created from these definitions inside `onupgradeneeded`.
+ * Stores, and the declared indexes an existing store lacks, are created from these
+ * definitions inside `onupgradeneeded`. A definition is a plain record whose optional
+ * members are absent, as {@link IndexDefinition} states, and `storeDefinitionContract`
+ * admits it.
  */
 export interface StoreDefinition {
 	readonly path?: KeyPath
@@ -115,7 +131,9 @@ export type IndexedDBSchema = Readonly<Record<string, StoreDefinition>>
  * Reached as `context.stores` on {@link IndexedDBUpgradeContext}. `names` lists
  * the stores the database holds at that moment, so it reflects any store
  * the built-in create-missing pass already created. `create` / `drop` add or remove
- * a whole store; `store` reaches a transaction-bound store for data migration.
+ * a whole store; `store` reaches a transaction-bound store for data migration. `create`
+ * admits its definition through `storeDefinitionContract` and refuses one outside
+ * {@link StoreDefinition} with `DATA` before any native call.
  * Versionchange-only: every call must stay within the upgrade transaction — no
  * non-IDB `await`, or it auto-commits and the upgrade fails.
  *
@@ -145,7 +163,9 @@ export interface IndexedDBUpgradeStoreManagerInterface {
  * Reached as `context.indexes` on {@link IndexedDBUpgradeContext}. `create` adds
  * a secondary index to a store — mirroring the index translation the built-in
  * schema pass applies to a store's declared `indexes` — and `drop` removes one
- * by name. Versionchange-only, and the named store must already exist within the
+ * by name. `create` admits its definition through `indexDefinitionContract` and refuses
+ * one outside {@link IndexDefinition} with `DATA` before any native call. Versionchange-only,
+ * and the named store must already exist within the
  * current upgrade transaction: declared in the schema, created earlier in the
  * same upgrade, or already present from a prior version.
  *
@@ -171,7 +191,8 @@ export interface IndexedDBUpgradeIndexManagerInterface {
  * @remarks
  * Runs INSIDE `onupgradeneeded`, after the built-in create-missing-stores pass —
  * so `stores.names` already reflects any store created from the declared
- * schema. `transaction` is the raw versionchange `IDBTransaction`, the escape hatch
+ * schema — and before the built-in index pass, which finds a declared index the
+ * callback created rather than colliding with it. `transaction` is the raw versionchange `IDBTransaction`, the escape hatch
  * for anything the raw API offers that this wrapper does not model directly; `old` /
  * `version` are the prior and target database versions (`old` is `0` on first
  * create); `stores` manages whole stores and `indexes` manages secondary indexes.
@@ -190,13 +211,39 @@ export interface IndexedDBUpgradeContext {
  * Represents the options for `createIndexedDBDatabase`.
  *
  * @remarks
+ * The constructor checks the whole options record through
+ * `indexedDBDatabaseOptionsContract`, with `upgrade` read as its preview, and refuses it with
+ * one `DATA` that names every malformed option at once, among options that are JSON data: a
+ * `name` that is not a non-empty string, `stores` outside {@link IndexedDBSchema}, a `version`
+ * that is not an integer of at least 1, an `upgrade` that is not a function, and any undeclared
+ * option. Its `context` is `{ faults }`. The constructor reads the caller's options once,
+ * through one top-level copy with `upgrade` read as its preview, and clones that copy once with
+ * `cloneJSONRecord`; the check and the audit both run on that clone, so no getter is read twice
+ * and the faults are the refused value's. A value contract cannot clone (one that is not JSON
+ * data, such as a member present as `undefined`, a class instance, a getter on a nested
+ * definition, or a number that is not finite, or one past contract's clone node limit) is
+ * refused with one `DATA` whose message and `context` (`{ clone }`) name that cause and whose
+ * `cause` is the contract error. This is a stated limit: a value that is not JSON data (a member
+ * present as `undefined`, a class instance, `NaN`, or an accessor) is refused with contract's
+ * clone cause, which names the failure but not the member's path, and the clone refuses before
+ * the contract checks, so one member that is not JSON data hides the faults of every other
+ * option until contract's clone error carries a path, which the campaign's contract unit owns;
+ * the refusal then names that path. An omitted option is absent, never present as `undefined`.
+ * The handle keeps the frozen clone it admitted, so a later change to the caller's objects
+ * reaches nothing it creates.
  * `name` is passed to `indexedDB.open`. `version` is optional: give it to pin an
  * explicit schema version (a higher number than the stored one triggers an upgrade
  * that creates any missing `stores`); omit it for **auto-managed** mode, where the
  * database opens at its current version and bumps once to create any declared store
- * the stored schema is missing — so adding a store never needs a manual version
- * bump. `upgrade` runs after the built-in create-missing-stores pass, inside the
- * same versionchange transaction — use it to drop a store with
+ * or declared index the stored schema is missing, or to check a declared index whose
+ * stored definition differs — so adding a store or an index never needs a manual
+ * version bump. `upgrade` runs after the built-in create-missing-stores pass, inside
+ * the same versionchange transaction, and before the built-in index pass: that pass
+ * creates each declared index an existing declared store lacks, and checks each
+ * declared index's key path, `unique`, and `multiple` against the stored index. A
+ * difference rejects `connect()` with `UPGRADE` carrying `context` `{ store, index }`,
+ * whose `cause` is an `UPGRADE` error with the same `context`. Neither pass drops a store or an index.
+ * Use the callback to drop a store with
  * `context.stores.drop`, add or remove an index on any store with
  * `context.indexes.create` / `context.indexes.drop`, or migrate data with
  * `context.stores.store(name)`. It may return `void` or a `Promise<void>` — an async
@@ -243,9 +290,11 @@ export interface IndexedDBCursorOptions {
  * @remarks
  * Wraps `IDBCursorWithValue`. `key` / `primary` / `value` snapshot the current
  * position (IndexedDB reuses the live cursor object on advance, so they are read
- * eagerly). `value` is the record at that position narrowed with `isRecord`, and
- * `undefined` when the stored value is not a record — the same absence
- * `readRecord` reports for that boundary. `continue` / `seek` / `advance` resolve
+ * eagerly). `value` is the record at that position, checked with `isRecord` when
+ * read: a stored value that is no record raises `RECORD` at that read, naming the
+ * store, the index on an index cursor, and the primary key. No other member reads
+ * the value, so the cursor still stops on that position, and `remove` deletes the
+ * entry there. `continue` / `seek` / `advance` resolve
  * to the next cursor or `null` at the end, and `seek` is valid only on a cursor
  * whose `source` is an index — on a store cursor it throws; `update` / `remove`
  * mutate the record at the current position. Every move returns the cursor at the
@@ -259,7 +308,7 @@ export interface IndexedDBCursorInterface {
 	readonly source: IDBObjectStore | IDBIndex
 	readonly key: IDBValidKey
 	readonly primary: IDBValidKey
-	readonly value: StoreRecord | undefined
+	readonly value: StoreRecord
 	readonly direction: IDBCursorDirection
 	/** Advances to the next record, or to the next record at or after a given key. */
 	continue(key?: IDBValidKey): Promise<IndexedDBCursorInterface | null>
@@ -296,7 +345,9 @@ export interface IndexedDBCursorInterface {
  * record for an index key (`resolve` throws `NOT_FOUND` on a miss); `records` /
  * `keys` read many (the matching records, and their **primary** keys); `primary`
  * maps an index key to one primary key; `count` / `has` test presence; `cursor`
- * streams matches. A read of several keys is the array overload of the same verb
+ * streams matches. `get` / `resolve` / `records` raise `RECORD` for a stored value
+ * that is no record, naming the store and the index, while `keys` / `primary` /
+ * `has` / `count` read every entry. A read of several keys is the array overload of the same verb
  * (`.claude/rules/patterns.md` § Managers § Batch operations).
  */
 export interface IndexedDBIndexInterface {
@@ -338,6 +389,8 @@ export interface IndexedDBIndexInterface {
  * `NOT_FOUND`); `records` / `keys` read many over an optional key range; `has` /
  * `count` test presence; `set` upserts and `add` inserts (throwing `CONSTRAINT`
  * on a duplicate); `remove` deletes; `clear` empties the store; `cursor` streams.
+ * `get` / `resolve` / `records` raise `RECORD` for a stored value that is no
+ * record, while `keys` / `has` / `count` read every entry.
  * The keyed verbs batch by their array overload — listed first, because an array is
  * itself a valid record and a compound `IDBValidKey`, so the array signature must
  * win (`.claude/rules/patterns.md` § Managers § Batch operations). To act on a

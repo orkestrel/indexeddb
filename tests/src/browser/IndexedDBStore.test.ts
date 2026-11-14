@@ -1,12 +1,24 @@
-import { IndexedDBError, isIndexedDBError, rangeFromKey, rangePrefix } from '@src/browser'
+import {
+	IndexedDBError,
+	isIndexedDBError,
+	promisifyRequest,
+	rangeFromKey,
+	rangePrefix,
+} from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { captureError, createTeardown } from '@orkestrel/test'
-import { createTestDatabase, drainCursor, errorCode } from '../../setupBrowser.js'
+import { captureError, createRecorder, createTeardown } from '@orkestrel/test'
+import {
+	createTestDatabase,
+	drainCursor,
+	errorCode,
+	SEED_BOOK_STORES,
+	seedNonRecord,
+} from '../../setupBrowser.js'
 
 // `IndexedDBStoreInterface` in real Chromium, reached through `db.store(name)`:
 // the metadata getters (`name` / `path` / `indexes` / `increment`), the full
 // keyed CRUD surface with its array-first batch overloads, key-range reads,
-// `index` / `cursor` access, and the `NOT_FOUND` / `CONSTRAINT` faults. Each
+// `index` / `cursor` access, and the `NOT_FOUND` / `CONSTRAINT` / `DATA` / `RECORD` faults. Each
 // test opens a uniquely-named database through the shared opener and disposes it
 // afterwards. (Index- and cursor-specific behavior is pinned in their own files;
 // here we exercise the store as the access point.)
@@ -212,6 +224,108 @@ describe('IndexedDBStore — key-range reads', () => {
 		expect(await users.count(rangePrefix('user:'))).toBe(2)
 		expect(await users.keys(rangeFromKey('user:2'))).toEqual(['user:2', 'zzz'])
 	})
+
+	it('reads a key that continues past U+FFFF after the prefix, and stops before its successor', async () => {
+		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
+		teardown.add(cleanup)
+		const users = db.store('users')
+		await users.set([{ id: 'user:1' }, { id: 'user:\uFFFFmore' }, { id: 'user;' }])
+		expect((await users.records(rangePrefix('user:'))).map((row) => row.id)).toEqual([
+			'user:1',
+			'user:\uFFFFmore',
+		])
+		expect(await users.count(rangePrefix('user:'))).toBe(2)
+	})
+
+	it('reads only the strings for a prefix with no successor, beside an array key and a binary key', async () => {
+		const { db, cleanup } = await createTestDatabase({ notes: {} })
+		teardown.add(cleanup)
+		const notes = db.store('notes')
+		await notes.set({ label: 'empty' }, '')
+		await notes.set({ label: 'plain' }, 'memo')
+		await notes.set({ label: 'top' }, '\uFFFF')
+		await notes.set({ label: 'past' }, '\uFFFFmore')
+		await notes.set({ label: 'binary' }, new ArrayBuffer(1))
+		await notes.set({ label: 'array' }, ['memo'])
+		expect((await notes.records(rangePrefix(''))).map((row) => row.label)).toEqual([
+			'empty',
+			'plain',
+			'top',
+			'past',
+		])
+		expect(await notes.count(rangePrefix(''))).toBe(4)
+		expect((await notes.records(rangePrefix('\uFFFF'))).map((row) => row.label)).toEqual([
+			'top',
+			'past',
+		])
+		expect(await notes.count(rangePrefix('\uFFFF'))).toBe(2)
+	})
+})
+
+describe('IndexedDBStore — a stored value that is no record', () => {
+	it('raises RECORD from get and resolve, naming the store and the key', async () => {
+		const books = (await seedNonRecord(teardown, 7310)).store('books')
+		expect(await books.get('a')).toEqual({ title: 'Atlas', length: 412 })
+		expect(await books.get('missing')).toBeUndefined()
+		const got = await books.get('b').catch((error: unknown) => error)
+		expect(got).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(got)).toBe('RECORD')
+		expect(got).toHaveProperty('context', { store: 'books', key: 'b' })
+		expect(String(got)).not.toContain('7310')
+		const resolved = await books.resolve('b').catch((error: unknown) => error)
+		expect(errorCode(resolved)).toBe('RECORD')
+		expect(resolved).toHaveProperty('context', { store: 'books', key: 'b' })
+		const batch = await books.get(['a', 'b']).catch((error: unknown) => error)
+		expect(errorCode(batch)).toBe('RECORD')
+		expect(batch).toHaveProperty('context', { store: 'books', key: 'b' })
+	})
+
+	it('raises RECORD from records, naming the key the pair reads', async () => {
+		const books = (await seedNonRecord(teardown, 7310)).store('books')
+		const caught = await books.records().catch((error: unknown) => error)
+		expect(errorCode(caught)).toBe('RECORD')
+		expect(caught).toHaveProperty('context', { store: 'books', key: 'b' })
+		expect(String(caught)).not.toContain('7310')
+		expect(await books.records(rangeFromKey('c'))).toEqual([{ title: 'Codex', length: 96 }])
+	})
+
+	it('reads the entry through count, has, and keys', async () => {
+		const books = (await seedNonRecord(teardown, 7310)).store('books')
+		expect(await books.count()).toBe(3)
+		expect(await books.has('b')).toBe(true)
+		expect(await books.keys()).toEqual(['a', 'b', 'c'])
+	})
+
+	it('encodes the key in the message through a capped preview, and keeps the raw key in the context', async () => {
+		const { db, cleanup } = await createTestDatabase(SEED_BOOK_STORES)
+		teardown.add(cleanup)
+		const long = 'k'.repeat(1_000_000)
+		const forged = "x); store 'y'"
+		await db.write('books', async (transaction) => {
+			const native = transaction.store('books').store
+			await promisifyRequest(native.put(7310, long))
+			await promisifyRequest(native.put(7310, forged))
+		})
+		const books = db.store('books')
+		const lengthy = await books.get(long).catch((error: unknown) => error)
+		expect(errorCode(lengthy)).toBe('RECORD')
+		expect(isIndexedDBError(lengthy) ? lengthy.message.length : Number.NaN).toBeLessThan(200)
+		expect(isIndexedDBError(lengthy) ? lengthy.context : undefined).toEqual({
+			store: 'books',
+			key: long,
+		})
+		const quoted = await books.get(forged).catch((error: unknown) => error)
+		expect(isIndexedDBError(quoted) ? quoted.message : undefined).toBe(
+			`Stored value is not a record (store "books", key "x); store 'y'"); rewrite or remove the entry`,
+		)
+		expect(quoted).toHaveProperty('context', { store: 'books', key: forged })
+	})
+
+	it('still raises DATA for an invalid key', async () => {
+		const books = (await seedNonRecord(teardown, 7310)).store('books')
+		const caught = await books.get(Number.NaN).catch((error: unknown) => error)
+		expect(errorCode(caught)).toBe('DATA')
+	})
 })
 
 describe('IndexedDBStore — index and cursor access', () => {
@@ -227,6 +341,9 @@ describe('IndexedDBStore — index and cursor access', () => {
 		const caught = captureError(() => users.index('byNothing'))
 		expect(caught).toBeInstanceOf(IndexedDBError)
 		expect(errorCode(caught)).toBe('NOT_FOUND')
+		expect(isIndexedDBError(caught) ? caught.message : undefined).toBe(
+			'Index "byNothing" is not declared on store "users"',
+		)
 	})
 
 	it('opens a cursor over the store, and null over an empty store', async () => {
@@ -236,6 +353,42 @@ describe('IndexedDBStore — index and cursor access', () => {
 		expect(await users.cursor()).toBeNull()
 		await users.set([{ id: 'a' }, { id: 'b' }])
 		const seen = await drainCursor(await users.cursor())
-		expect(seen.map((cursor) => cursor.value?.id)).toEqual(['a', 'b'])
+		expect(seen.map((cursor) => cursor.value.id)).toEqual(['a', 'b'])
+	})
+})
+
+describe('IndexedDBStore — requests a bulk read issues', () => {
+	it('issues one request for a clean read, and the failing read pairs two more', async () => {
+		const db = await seedNonRecord(teardown, 7310)
+		const successes = createRecorder<[Event]>()
+		const listening = new AbortController()
+		db.database.addEventListener('success', successes.handler, {
+			capture: true,
+			signal: listening.signal,
+		})
+		const books = db.store('books')
+		await books.records(rangeFromKey('c'))
+		expect(successes.calls).toHaveLength(1)
+		await books.records().catch((error: unknown) => error)
+		expect(successes.calls).toHaveLength(4)
+		listening.abort()
+	})
+
+	it('issues one request for a clean point read, on a store and on an index', async () => {
+		const db = await seedNonRecord(teardown, 7310)
+		const successes = createRecorder<[Event]>()
+		const listening = new AbortController()
+		db.database.addEventListener('success', successes.handler, {
+			capture: true,
+			signal: listening.signal,
+		})
+		expect(await db.store('books').get('a')).toEqual({ title: 'Atlas', length: 412 })
+		expect(successes.calls).toHaveLength(1)
+		expect(await db.store('books').index('byLength').get(96)).toEqual({
+			title: 'Codex',
+			length: 96,
+		})
+		expect(successes.calls).toHaveLength(2)
+		listening.abort()
 	})
 })

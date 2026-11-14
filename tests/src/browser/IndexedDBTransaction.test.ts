@@ -1,8 +1,8 @@
 import type { IndexedDBTransactionInterface } from '@src/browser'
-import { IndexedDBError } from '@src/browser'
+import { IndexedDBError, isIndexedDBError } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import { captureError, createTeardown } from '@orkestrel/test'
-import { createTestDatabase, errorCode } from '../../setupBrowser.js'
+import { createTestDatabase, errorCode, MESSAGE_NAMES } from '../../setupBrowser.js'
 
 // `IndexedDBTransactionInterface` in real Chromium, obtained through the `scope`
 // callback of `db.read` / `db.write`: the metadata getters (`transaction` /
@@ -181,4 +181,39 @@ describe('IndexedDBTransaction — commit', () => {
 		expect(await caught.promise).toBeInstanceOf(IndexedDBError)
 		expect(errorCode(await caught.promise)).toBe('INACTIVE')
 	})
+})
+
+describe('IndexedDBTransaction — messages write store names through preview', () => {
+	it.for(MESSAGE_NAMES)(
+		'names the scope it refuses a store outside ($shown)',
+		async ({ name, shown }) => {
+			const { db, cleanup } = await createTestDatabase({ [name]: {}, outside: {} })
+			teardown.add(cleanup)
+			const caught = Promise.withResolvers<unknown>()
+			await db.read(name, (transaction) => {
+				caught.resolve(captureError(() => transaction.store('outside')))
+			})
+			const fault = await caught.promise
+			expect(isIndexedDBError(fault) ? fault.message : undefined).toBe(
+				`Store "outside" is outside this transaction's scope (${shown})`,
+			)
+		},
+	)
+
+	it.for(MESSAGE_NAMES)(
+		'names the scope of a transaction that is no longer active ($shown)',
+		async ({ name, shown }) => {
+			const { db, cleanup } = await createTestDatabase({ [name]: {} })
+			teardown.add(cleanup)
+			const captured = Promise.withResolvers<IndexedDBTransactionInterface>()
+			await db.read(name, (transaction) => {
+				captured.resolve(transaction)
+			})
+			const finished = await captured.promise
+			const fault = captureError(() => finished.store(name))
+			expect(isIndexedDBError(fault) ? fault.message : undefined).toBe(
+				`Transaction over ${shown} is no longer active`,
+			)
+		},
+	)
 })

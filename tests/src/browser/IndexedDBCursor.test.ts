@@ -1,10 +1,11 @@
-import { IndexedDBError, promisifyRequest, rangeFromKey } from '@src/browser'
+import { IndexedDBError, rangeFromKey } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createTeardown } from '@orkestrel/test'
+import { captureError, createTeardown } from '@orkestrel/test'
 import {
 	createTestDatabase,
 	drainCursor,
 	errorCode,
+	seedNonRecord,
 	seedStore,
 	updateCursor,
 } from '../../setupBrowser.js'
@@ -12,8 +13,8 @@ import {
 // `IndexedDBCursorInterface` in real Chromium, obtained from a store or index
 // cursor: the position snapshot (`cursor` / `source` / `key` / `primary` /
 // `value` / `direction`), the moves (`continue` / `seek` / `advance`), the
-// in-place `update` / `remove`, and the `isRecord` boundary that reports a
-// non-record stored value as `undefined`. The position is read eagerly at construction
+// in-place `update` / `remove`, and the `RECORD` raise at the `value` read of a
+// stored value that is no record. The position is read eagerly at construction
 // because IndexedDB reuses the live cursor object on advance, so we assert it
 // against the recorded `IndexedDBCursor`, not a re-read. Each test opens a
 // uniquely-named database through the shared opener.
@@ -47,7 +48,7 @@ describe('IndexedDBCursor — position snapshot', () => {
 		if (!cursor) return
 		expect(cursor.direction).toBe('prev')
 		const seen = await drainCursor(cursor)
-		expect(seen.map((step) => step.value?.id)).toEqual(['c', 'b', 'a'])
+		expect(seen.map((step) => step.value.id)).toEqual(['c', 'b', 'a'])
 	})
 })
 
@@ -55,7 +56,7 @@ describe('IndexedDBCursor — moves', () => {
 	it('continue advances one record at a time, then null at the end', async () => {
 		const db = await seedStore(teardown)
 		const cursors = await drainCursor(await db.store('users').cursor())
-		const visited = cursors.map((cursor) => String(cursor.value?.id))
+		const visited = cursors.map((cursor) => String(cursor.value.id))
 		expect(visited).toEqual(['a', 'b', 'c'])
 	})
 
@@ -174,7 +175,7 @@ describe('IndexedDBCursor — ranges', () => {
 	it('honours the cursor query range', async () => {
 		const db = await seedStore(teardown)
 		const seen = await drainCursor(await db.store('users').cursor({ query: rangeFromKey('b') }))
-		expect(seen.map((step) => step.value?.id)).toEqual(['b', 'c'])
+		expect(seen.map((step) => step.value.id)).toEqual(['b', 'c'])
 	})
 })
 
@@ -191,24 +192,40 @@ describe('IndexedDBCursor — long walks over one re-armed request', () => {
 		const ids = Array.from({ length: 24 }, (_, index) => `u${String(index).padStart(2, '0')}`)
 		await db.store('users').set(ids.map((id) => ({ id })))
 		const seen = await drainCursor(await db.store('users').cursor())
-		expect(seen.map((cursor) => cursor.value?.id)).toEqual(ids)
+		expect(seen.map((cursor) => cursor.value.id)).toEqual(ids)
 		expect(seen.map((cursor) => cursor.key)).toEqual(ids)
 	})
 })
 
-describe('IndexedDBCursor — non-record values', () => {
-	it('reports a non-record stored value as undefined, the same absence readRecord reports', async () => {
-		const { db, cleanup } = await createTestDatabase({ store: {} })
-		teardown.add(cleanup)
-		await db.write('store', async (transaction) => {
-			const native = transaction.store('store').store
-			await promisifyRequest(native.put({ id: 'record' }, 'a'))
-			await promisifyRequest(native.put(42, 'b')) // a non-record clone
-		})
-		const seen = await drainCursor(await db.store('store').cursor())
-		expect(seen.map((step) => step.value)).toEqual([{ id: 'record' }, undefined])
-		expect(seen.map((step) => step.key)).toEqual(['a', 'b'])
-		expect(seen.map((step) => step.primary)).toEqual(['a', 'b'])
-		expect(await db.store('store').get('b')).toBeUndefined()
+describe('IndexedDBCursor — a stored value that is no record', () => {
+	it('raises RECORD at the value read, naming the store and the key, and still removes the entry', async () => {
+		const db = await seedNonRecord(teardown, 7310)
+		const first = await db.store('books').cursor()
+		expect(first?.value).toEqual({ title: 'Atlas', length: 412 })
+		const stopped = first ? await first.continue() : first
+		expect(stopped?.key).toBe('b')
+		expect(stopped?.primary).toBe('b')
+		const caught = captureError(() => stopped?.value)
+		expect(caught).toBeInstanceOf(IndexedDBError)
+		expect(errorCode(caught)).toBe('RECORD')
+		expect(caught).toHaveProperty('context', { store: 'books', key: 'b' })
+		expect(String(caught)).not.toContain('7310')
+		await stopped?.remove()
+		const last = stopped ? await stopped.continue() : stopped
+		expect(last?.value).toEqual({ title: 'Codex', length: 96 })
+		expect(await db.store('books').keys()).toEqual(['a', 'c'])
+	})
+
+	it('names the index and the primary key on an index cursor', async () => {
+		const db = await seedNonRecord(teardown, 'xyz')
+		const first = await db.store('books').index('byLength').cursor()
+		expect(first?.key).toBe(3)
+		expect(first?.primary).toBe('b')
+		const caught = captureError(() => first?.value)
+		expect(errorCode(caught)).toBe('RECORD')
+		expect(caught).toHaveProperty('context', { store: 'books', index: 'byLength', key: 'b' })
+		expect(String(caught)).not.toContain('xyz')
+		const next = first ? await first.continue() : first
+		expect(next?.value).toEqual({ title: 'Codex', length: 96 })
 	})
 })

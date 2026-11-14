@@ -1,13 +1,42 @@
-import type { IndexedDBDatabaseInterface } from '@src/browser'
+import type {
+	IndexDefinition,
+	IndexedDBDatabaseInterface,
+	IndexedDBSchema,
+	StoreDefinition,
+} from '@src/browser'
 import {
 	createIndexedDBDatabase,
+	IndexedDBDatabase,
 	IndexedDBError,
+	isIndexedDBError,
 	promisifyRequest,
 	promisifyTransaction,
 } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
-import { captureError, createRecorder, createTeardown, waitForDelay } from '@orkestrel/test'
-import { createTestDatabase, dropDatabase, errorCode, mintDatabase } from '../../setupBrowser.js'
+import { isString } from '@orkestrel/contract'
+import {
+	captureError,
+	createRecorder,
+	createTeardown,
+	invokeUnchecked,
+	waitForDelay,
+} from '@orkestrel/test'
+import {
+	createTestDatabase,
+	dropDatabase,
+	createChangingOptions,
+	createShiftingOptions,
+	createShiftingStores,
+	errorCode,
+	IndexLike,
+	StoreLike,
+	MESSAGE_NAMES,
+	migrateNothing,
+	OPTIONS_REFUSAL_HEADER,
+	OPTIONS_REFUSAL_SUMMARY,
+	mintDatabase,
+	REFUSED_OPTIONS,
+} from '../../setupBrowser.js'
 
 // The `IndexedDBDatabaseInterface` surface in real Chromium: lazy connect and
 // state (`name` / `version` / `stores` / `open` / `database`), the `store`
@@ -60,12 +89,12 @@ describe('IndexedDBDatabase — connection and state', () => {
 
 	it('rejects an empty name and a non-positive version at construction', () => {
 		const emptyName = captureError(() => createIndexedDBDatabase({ name: '', stores: {} }))
-		expect(errorCode(emptyName)).toBe('OPEN')
+		expect(errorCode(emptyName)).toBe('DATA')
 
 		const badVersion = captureError(() =>
 			createIndexedDBDatabase({ name: mintDatabase(), version: 0, stores: {} }),
 		)
-		expect(errorCode(badVersion)).toBe('OPEN')
+		expect(errorCode(badVersion)).toBe('DATA')
 	})
 
 	it('throws CLOSED on connect once closed', async () => {
@@ -510,10 +539,10 @@ describe('IndexedDBDatabase — auto-managed schema (no version)', () => {
 		for (const caught of [firstCaught, secondCaught]) {
 			expect(caught).toBeInstanceOf(IndexedDBError)
 			expect(errorCode(caught)).toBe('UPGRADE')
-			const schemaCause = caught instanceof IndexedDBError ? caught.cause : undefined
+			const schemaCause = isIndexedDBError(caught) ? caught.cause : undefined
 			expect(schemaCause).toBeInstanceOf(IndexedDBError)
 			expect(errorCode(schemaCause)).toBe('CONSTRAINT')
-			const nativeCause = schemaCause instanceof IndexedDBError ? schemaCause.cause : undefined
+			const nativeCause = isIndexedDBError(schemaCause) ? schemaCause.cause : undefined
 			expect(nativeCause).toBeInstanceOf(DOMException)
 			expect(nativeCause).toHaveProperty('name', 'ConstraintError')
 		}
@@ -692,7 +721,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 				const store = context.stores.store('users')
 				const rows = await store.records()
 				for (const row of rows) {
-					const nameValue = typeof row.name === 'string' ? row.name.toUpperCase() : row.name
+					const nameValue = isString(row.name) ? row.name.toUpperCase() : row.name
 					await store.set({ ...row, name: nameValue })
 				}
 			},
@@ -735,7 +764,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 		const caught = await v2.connect().catch((error: unknown) => error)
 		expect(caught).toBeInstanceOf(IndexedDBError)
 		expect(errorCode(caught)).toBe('UPGRADE')
-		expect(caught instanceof IndexedDBError ? caught.cause : undefined).toBe(failure)
+		expect(isIndexedDBError(caught) ? caught.cause : undefined).toBe(failure)
 		expect(v2.open).toBe(false)
 
 		// The upgrade never half-applied: the database is still at version 1, and a
@@ -776,7 +805,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			await dropDatabase(name)
 		})
 		const caught = await v2.connect().catch((error: unknown) => error)
-		const upgrade = caught instanceof IndexedDBError ? caught : undefined
+		const upgrade = isIndexedDBError(caught) ? caught : undefined
 		expect(caught).toBeInstanceOf(IndexedDBError)
 		expect(errorCode(caught)).toBe('UPGRADE')
 		expect(Object.hasOwn(upgrade ?? {}, 'cause')).toBe(true)
@@ -803,7 +832,7 @@ describe('IndexedDBDatabase — upgrade hook', () => {
 			await dropDatabase(name)
 		})
 		const caught = await v2.connect().catch((error: unknown) => error)
-		const upgrade = caught instanceof IndexedDBError ? caught : undefined
+		const upgrade = isIndexedDBError(caught) ? caught : undefined
 		expect(caught).toBeInstanceOf(IndexedDBError)
 		expect(errorCode(caught)).toBe('UPGRADE')
 		expect(Object.hasOwn(upgrade ?? {}, 'cause')).toBe(true)
@@ -1042,5 +1071,665 @@ describe('IndexedDBDatabase — persistence and drop', () => {
 			await dropDatabase(name)
 		})
 		expect(await fresh.store('users').get('u1')).toBeUndefined()
+	})
+})
+
+describe('IndexedDBDatabase — declared index reconcile', () => {
+	it('creates a declared index an auto-managed reopen adds, keeps the rows, and moves no version on an identical reopen', async () => {
+		const name = mintDatabase()
+		await dropDatabase(name)
+		teardown.add(async () => dropDatabase(name))
+		const first = createIndexedDBDatabase({ name, stores: { users: { path: 'id' } } })
+		await first.connect()
+		await first.store('users').set([
+			{ id: 'u1', name: 'Ada' },
+			{ id: 'u2', name: 'Bea' },
+		])
+		first.close()
+
+		const declared = { users: { path: 'id', indexes: [{ name: 'byName', path: 'name' }] } }
+		const second = createIndexedDBDatabase({ name, stores: declared })
+		await second.connect()
+		expect(second.version).toBe(2)
+		expect(
+			Array.from(second.database.transaction(['users']).objectStore('users').indexNames),
+		).toEqual(['byName'])
+		expect(await second.store('users').index('byName').get('Bea')).toEqual({
+			id: 'u2',
+			name: 'Bea',
+		})
+		expect(await second.store('users').records()).toEqual([
+			{ id: 'u1', name: 'Ada' },
+			{ id: 'u2', name: 'Bea' },
+		])
+		second.close()
+
+		const third = createIndexedDBDatabase({ name, stores: declared })
+		await third.connect()
+		expect(third.version).toBe(2)
+		third.close()
+	})
+
+	it('creates a declared index an existing store lacks on a pinned bump with no callback', async () => {
+		const name = mintDatabase()
+		await dropDatabase(name)
+		teardown.add(async () => dropDatabase(name))
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		await v1.store('users').set({ id: 'u1', name: 'Ada' })
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id', indexes: [{ name: 'byName', path: 'name', unique: true }] } },
+		})
+		await v2.connect()
+		const index = v2.database.transaction(['users']).objectStore('users').index('byName')
+		expect([index.keyPath, index.unique, index.multiEntry]).toEqual(['name', true, false])
+		expect(await v2.store('users').index('byName').get('Ada')).toEqual({ id: 'u1', name: 'Ada' })
+		v2.close()
+	})
+
+	it('rejects connect() with UPGRADE naming the store and index when a stored index differs', async () => {
+		const name = mintDatabase()
+		await dropDatabase(name)
+		teardown.add(async () => dropDatabase(name))
+		const v1 = createIndexedDBDatabase({
+			name,
+			version: 1,
+			stores: { users: { path: 'id', indexes: [{ name: 'byName', path: 'name' }] } },
+		})
+		await v1.connect()
+		v1.close()
+
+		const pinned = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id', indexes: [{ name: 'byName', path: 'title' }] } },
+		})
+		const auto = createIndexedDBDatabase({
+			name,
+			stores: { users: { path: 'id', indexes: [{ name: 'byName', path: 'name', unique: true }] } },
+		})
+		for (const handle of [pinned, auto]) {
+			const caught = await handle.connect().catch((error: unknown) => error)
+			expect(errorCode(caught)).toBe('UPGRADE')
+			expect(caught).toHaveProperty('context', { store: 'users', index: 'byName' })
+			const cause = isIndexedDBError(caught) ? caught.cause : undefined
+			expect(errorCode(cause)).toBe('UPGRADE')
+			expect(cause).toHaveProperty('context', { store: 'users', index: 'byName' })
+			expect(handle.open).toBe(false)
+		}
+		const stored = await globalThis.indexedDB.databases()
+		expect(stored.find((database) => database.name === name)?.version).toBe(1)
+	})
+
+	it('neither bumps nor creates a missing declared index on a pinned open at the stored version', async () => {
+		const name = mintDatabase()
+		await dropDatabase(name)
+		teardown.add(async () => dropDatabase(name))
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		v1.close()
+
+		const pinned = createIndexedDBDatabase({
+			name,
+			version: 1,
+			stores: { users: { path: 'id', indexes: [{ name: 'byName', path: 'name' }] } },
+		})
+		await pinned.connect()
+		expect(pinned.version).toBe(1)
+		expect(
+			Array.from(pinned.database.transaction(['users']).objectStore('users').indexNames),
+		).toEqual([])
+		pinned.close()
+	})
+
+	it('keeps an undeclared index a callback created across a later bump', async () => {
+		const name = mintDatabase()
+		await dropDatabase(name)
+		teardown.add(async () => dropDatabase(name))
+		const v1 = createIndexedDBDatabase({
+			name,
+			version: 1,
+			stores: { users: { path: 'id' } },
+			upgrade: (context) => {
+				context.indexes.create('users', { name: 'bySlug', path: 'slug' })
+			},
+		})
+		await v1.connect()
+		v1.close()
+
+		const later = createIndexedDBDatabase({
+			name,
+			stores: { users: { path: 'id' }, posts: { path: 'id' } },
+		})
+		await later.connect()
+		expect(later.version).toBe(2)
+		expect(
+			Array.from(later.database.transaction(['users']).objectStore('users').indexNames),
+		).toEqual(['bySlug'])
+		later.close()
+	})
+})
+
+describe('IndexedDBDatabase — a callback that aborts the versionchange transaction', () => {
+	it('rejects connect() with UPGRADE over ABORTED over the native AbortError when the callback aborts synchronously, and keeps the version', async () => {
+		const name = mintDatabase()
+		await dropDatabase(name)
+		teardown.add(async () => dropDatabase(name))
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' } },
+			upgrade: (context) => {
+				context.transaction.abort()
+			},
+		})
+		const caught = await v2.connect().catch((error: unknown) => error)
+		expect(errorCode(caught)).toBe('UPGRADE')
+		const cause = isIndexedDBError(caught) ? caught.cause : undefined
+		expect(errorCode(cause)).toBe('ABORTED')
+		expect(isIndexedDBError(cause) ? cause.cause : undefined).toHaveProperty('name', 'AbortError')
+		expect(v2.open).toBe(false)
+		const stored = await globalThis.indexedDB.databases()
+		expect(stored.find((database) => database.name === name)?.version).toBe(1)
+	})
+
+	it('rejects connect() the same way when the callback awaits a request and then aborts', async () => {
+		const name = mintDatabase()
+		await dropDatabase(name)
+		teardown.add(async () => dropDatabase(name))
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id', indexes: [{ name: 'byName', path: 'name' }] } },
+			upgrade: async (context) => {
+				await context.stores.store('users').count()
+				context.transaction.abort()
+			},
+		})
+		const caught = await v2.connect().catch((error: unknown) => error)
+		expect(errorCode(caught)).toBe('UPGRADE')
+		const cause = isIndexedDBError(caught) ? caught.cause : undefined
+		expect(errorCode(cause)).toBe('ABORTED')
+		expect(isIndexedDBError(cause) ? cause.cause : undefined).toHaveProperty('name', 'AbortError')
+		const stored = await globalThis.indexedDB.databases()
+		expect(stored.find((database) => database.name === name)?.version).toBe(1)
+	})
+})
+
+describe('IndexedDBDatabase — construction refuses options the types forbid', () => {
+	it('admits a bound function and an async function as upgrade', () => {
+		const bound = createIndexedDBDatabase({
+			name: 'catalogue',
+			stores: {},
+			upgrade: migrateNothing.bind(undefined),
+		})
+		const asynchronous = createIndexedDBDatabase({
+			name: 'catalogue',
+			stores: {},
+			upgrade: async () => undefined,
+		})
+		expect([bound.name, asynchronous.name]).toEqual(['catalogue', 'catalogue'])
+	})
+
+	it.for(REFUSED_OPTIONS)('refuses $label with DATA', ({ options, message, context }) => {
+		const caught = captureError(() =>
+			invokeUnchecked(undefined, createIndexedDBDatabase, [options]),
+		)
+		expect(errorCode(caught)).toBe('DATA')
+		expect(isIndexedDBError(caught) ? caught.message : undefined).toBe(message)
+		expect(caught).toHaveProperty('context', context)
+	})
+})
+
+describe('IndexedDBDatabase — an open that fails before its upgrade', () => {
+	it.for(MESSAGE_NAMES)(
+		'rejects connect() with OPEN over the native VersionError for a lower pinned version, naming $shown',
+		async ({ name, shown }) => {
+			await dropDatabase(name)
+			teardown.add(async () => dropDatabase(name))
+			const v2 = createIndexedDBDatabase({ name, version: 2, stores: {} })
+			await v2.connect()
+			v2.close()
+
+			const v1 = createIndexedDBDatabase({ name, version: 1, stores: {} })
+			const caught = await v1.connect().catch((error: unknown) => error)
+			expect(errorCode(caught)).toBe('OPEN')
+			expect(isIndexedDBError(caught) ? caught.message : undefined).toBe(
+				`Failed to open database ${shown}`,
+			)
+			const cause = isIndexedDBError(caught) ? caught.cause : undefined
+			expect(isIndexedDBError(cause)).toBe(false)
+			expect(cause).toHaveProperty('name', 'VersionError')
+		},
+	)
+})
+
+describe('IndexedDBDatabase — messages write caller values through preview', () => {
+	it.for(MESSAGE_NAMES)('names a version the types forbid ($shown)', ({ name, received }) => {
+		const caught = captureError(() =>
+			invokeUnchecked(undefined, createIndexedDBDatabase, [
+				{ name: 'catalogue', version: name, stores: {} },
+			]),
+		)
+		expect(isIndexedDBError(caught) ? caught.message : undefined).toBe(
+			`${OPTIONS_REFUSAL_HEADER}\nversion: type; expected integer; received ${received}\n${OPTIONS_REFUSAL_SUMMARY}`,
+		)
+	})
+
+	it.for(MESSAGE_NAMES)('names the database read before connect ($shown)', ({ name, shown }) => {
+		const db = createIndexedDBDatabase({ name, stores: {} })
+		const caught = captureError(() => db.database)
+		expect(isIndexedDBError(caught) ? caught.message : undefined).toBe(
+			`Database ${shown} is not open — call connect() first`,
+		)
+	})
+
+	it.for(MESSAGE_NAMES)(
+		'names the database connect refuses after close ($shown)',
+		({ name, shown }) => {
+			const db = createIndexedDBDatabase({ name, stores: {} })
+			db.close()
+			const caught = captureError(() => db.connect())
+			expect(isIndexedDBError(caught) ? caught.message : undefined).toBe(
+				`Database ${shown} has been closed`,
+			)
+		},
+	)
+
+	it.for(MESSAGE_NAMES)(
+		'names the database whose pending open a close retires ($shown)',
+		async ({ name, shown }) => {
+			await dropDatabase(name)
+			teardown.add(async () => dropDatabase(name))
+			const db = createIndexedDBDatabase({ name, stores: {} })
+			const pending = db.connect()
+			db.close()
+			const caught = await pending.catch((error: unknown) => error)
+			expect(isIndexedDBError(caught) ? caught.message : undefined).toBe(
+				`Database ${shown} has been closed`,
+			)
+		},
+	)
+
+	it.for(MESSAGE_NAMES)('names an undeclared store ($shown)', ({ name, shown }) => {
+		const db = new IndexedDBDatabase<IndexedDBSchema>({ name: 'catalogue', stores: {} })
+		const caught = captureError(() => db.store(name))
+		expect(isIndexedDBError(caught) ? caught.message : undefined).toBe(
+			`Store ${shown} is not declared on database "catalogue"`,
+		)
+	})
+
+	it.for(MESSAGE_NAMES)(
+		'names the database whose upgrade failed ($shown)',
+		async ({ name, shown }) => {
+			await dropDatabase(name)
+			teardown.add(async () => dropDatabase(name))
+			const db = createIndexedDBDatabase({
+				name,
+				stores: {},
+				upgrade: () => {
+					throw new Error('migration refused')
+				},
+			})
+			const caught = await db.connect().catch((error: unknown) => error)
+			expect(isIndexedDBError(caught) ? caught.message : undefined).toBe(
+				`Upgrade of ${shown} failed`,
+			)
+		},
+	)
+
+	it.for(MESSAGE_NAMES)(
+		'names the store and index whose stored definition differs ($shown)',
+		async ({ name, shown }) => {
+			const database = mintDatabase()
+			await dropDatabase(database)
+			teardown.add(async () => dropDatabase(database))
+			const v1 = createIndexedDBDatabase({
+				name: database,
+				version: 1,
+				stores: { [name]: { indexes: [{ name, path: 'title' }] } },
+			})
+			await v1.connect()
+			v1.close()
+			const v2 = createIndexedDBDatabase({
+				name: database,
+				version: 2,
+				stores: { [name]: { indexes: [{ name, path: 'heading' }] } },
+			})
+			const caught = await v2.connect().catch((error: unknown) => error)
+			const cause = isIndexedDBError(caught) ? caught.cause : undefined
+			expect(isIndexedDBError(cause) ? cause.message : undefined).toBe(
+				`Index ${shown} on store ${shown} differs from its declaration in path; drop it in an upgrade callback or match the declaration to it`,
+			)
+		},
+	)
+})
+
+describe('IndexedDBDatabase — construction names every malformed store', () => {
+	it('carries the audit faults of every malformed store in the refusal context', () => {
+		const caught = captureError(() =>
+			invokeUnchecked(undefined, createIndexedDBDatabase, [
+				{
+					name: 'catalogue',
+					stores: {
+						books: { path: 'id', autoIncrement: true, increment: 'yes' },
+						notes: { path: 5 },
+					},
+				},
+			]),
+		)
+		expect(errorCode(caught)).toBe('DATA')
+		expect(isIndexedDBError(caught) ? caught.context : undefined).toEqual({
+			faults: [
+				{
+					reason: 'type',
+					path: ['stores', 'books', 'increment'],
+					expected: 'boolean',
+					received: '"yes"',
+				},
+				{ reason: 'extra', path: ['stores', 'books', 'autoIncrement'] },
+				{ reason: 'variant', path: ['stores', 'notes', 'path'], variants: 2 },
+				{ reason: 'type', path: ['stores', 'notes', 'path'], expected: 'string', received: '5' },
+			],
+		})
+	})
+})
+
+describe('IndexedDBDatabase — upgrade verbs refuse definitions the types forbid', () => {
+	it('refuses an index definition with a string unique flag as DATA before any native call', async () => {
+		const name = mintDatabase()
+		await dropDatabase(name)
+		teardown.add(async () => dropDatabase(name))
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' } },
+			upgrade: (context) => {
+				invokeUnchecked(context.indexes, context.indexes.create, [
+					'users',
+					{ name: 'byTitle', path: 'title', unique: 'no' },
+				])
+			},
+		})
+		const caught = await v2.connect().catch((error: unknown) => error)
+		expect(errorCode(caught)).toBe('UPGRADE')
+		const cause = isIndexedDBError(caught) ? caught.cause : undefined
+		expect(errorCode(cause)).toBe('DATA')
+		expect(isIndexedDBError(cause) ? cause.message : undefined).toBe(
+			'Index definition for store "users" is not an IndexDefinition:\n' +
+				'unique: type; expected boolean; received "no"\nsend {"name": string, "path": string | array of string, "unique"?: boolean, "multiple"?: boolean}',
+		)
+		expect(caught).toHaveProperty('context', {
+			store: 'users',
+			faults: [{ reason: 'type', path: ['unique'], expected: 'boolean', received: '"no"' }],
+		})
+		const stored = await globalThis.indexedDB.databases()
+		expect(stored.find((database) => database.name === name)?.version).toBe(1)
+	})
+
+	it('refuses a store definition with a numeric key path as DATA before any native call', async () => {
+		const name = mintDatabase()
+		await dropDatabase(name)
+		teardown.add(async () => dropDatabase(name))
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' } },
+			upgrade: (context) => {
+				invokeUnchecked(context.stores, context.stores.create, ['logs', { path: 5 }])
+			},
+		})
+		const caught = await v2.connect().catch((error: unknown) => error)
+		expect(errorCode(caught)).toBe('UPGRADE')
+		const cause = isIndexedDBError(caught) ? caught.cause : undefined
+		expect(errorCode(cause)).toBe('DATA')
+		expect(isIndexedDBError(cause) ? cause.message : undefined).toBe(
+			'Store "logs" is not a StoreDefinition:\n' +
+				'path: variant; the value matches none of the 2 declared forms; send it exactly as the schema declares, one of: string or array of string\npath: type; expected string; received 5\nsend {"path"?: string | array of string, "increment"?: boolean, "indexes"?: array of {"name": string, "path": string | array…}',
+		)
+		expect(caught).toHaveProperty('context', {
+			store: 'logs',
+			faults: [
+				{ reason: 'variant', path: ['path'], variants: 2 },
+				{ reason: 'type', path: ['path'], expected: 'string', received: '5' },
+			],
+		})
+		const stored = await globalThis.indexedDB.databases()
+		expect(stored.find((database) => database.name === name)?.version).toBe(1)
+	})
+
+	it.for([
+		['a class instance', new IndexLike()],
+		[
+			'an optional member present as undefined',
+			{ name: 'byTitle', path: 'title', unique: undefined },
+		],
+	] as const)('refuses %s as an index definition with DATA', async ([, definition]) => {
+		const name = mintDatabase()
+		await dropDatabase(name)
+		teardown.add(async () => dropDatabase(name))
+		const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+		await v1.connect()
+		v1.close()
+
+		const v2 = createIndexedDBDatabase({
+			name,
+			version: 2,
+			stores: { users: { path: 'id' } },
+			upgrade: (context) => {
+				invokeUnchecked(context.indexes, context.indexes.create, ['users', definition])
+			},
+		})
+		const caught = await v2.connect().catch((error: unknown) => error)
+		expect(errorCode(caught)).toBe('UPGRADE')
+		expect(errorCode(isIndexedDBError(caught) ? caught.cause : undefined)).toBe('DATA')
+	})
+})
+
+describe('IndexedDBDatabase — the store verb refuses the store-level boundaries', () => {
+	it.for([
+		[
+			'a class instance',
+			new StoreLike(),
+			'value: type; expected object; received object\nsend {"path"?: string | array of string, "increment"?: boolean, "indexes"?: array of {"name": string, "path": string | array…}',
+			[{ reason: 'type', path: [], expected: 'object', received: 'object' }],
+		],
+		[
+			'an increment present as undefined',
+			{ increment: undefined },
+			'increment: type; expected boolean; received undefined\nsend {"path"?: string | array of string, "increment"?: boolean, "indexes"?: array of {"name": string, "path": string | array…}',
+			[{ reason: 'type', path: ['increment'], expected: 'boolean', received: 'undefined' }],
+		],
+		[
+			'a path present as undefined',
+			{ path: undefined },
+			'path: variant; the value matches none of the 2 declared forms; send it exactly as the schema declares, one of: string or array of string\npath: type; expected string; received undefined\nsend {"path"?: string | array of string, "increment"?: boolean, "indexes"?: array of {"name": string, "path": string | array…}',
+			[
+				{ reason: 'variant', path: ['path'], variants: 2 },
+				{ reason: 'type', path: ['path'], expected: 'string', received: 'undefined' },
+			],
+		],
+	] as const)(
+		'refuses %s as a store definition with DATA',
+		async ([, definition, text, faults]) => {
+			const name = mintDatabase()
+			await dropDatabase(name)
+			teardown.add(async () => dropDatabase(name))
+			const v1 = createIndexedDBDatabase({ name, version: 1, stores: { users: { path: 'id' } } })
+			await v1.connect()
+			v1.close()
+
+			const v2 = createIndexedDBDatabase({
+				name,
+				version: 2,
+				stores: { users: { path: 'id' } },
+				upgrade: (context) => {
+					invokeUnchecked(context.stores, context.stores.create, ['logs', definition])
+				},
+			})
+			const caught = await v2.connect().catch((error: unknown) => error)
+			expect(errorCode(caught)).toBe('UPGRADE')
+			const cause = isIndexedDBError(caught) ? caught.cause : undefined
+			expect(errorCode(cause)).toBe('DATA')
+			expect(isIndexedDBError(cause) ? cause.message : undefined).toBe(
+				'Store "logs" is not a StoreDefinition:\n' + text,
+			)
+			expect(caught).toHaveProperty('context', { store: 'logs', faults })
+			const stored = await globalThis.indexedDB.databases()
+			expect(stored.find((database) => database.name === name)?.version).toBe(1)
+		},
+	)
+})
+
+describe('IndexedDBDatabase — construction holds the options it admitted', () => {
+	it('creates only the stores and indexes the options held at construction, whatever the caller changes later', async () => {
+		const name = mintDatabase()
+		await dropDatabase(name)
+		teardown.add(async () => dropDatabase(name))
+		const indexes: IndexDefinition[] = [{ name: 'byTitle', path: 'title' }]
+		const stores: Record<string, StoreDefinition> = { books: { path: 'id', indexes } }
+		const db = createIndexedDBDatabase({ name, stores })
+		indexes.push({ name: 'byInjected', path: 'injected', unique: true })
+		stores.injected = { path: 'id' }
+		await db.connect()
+		expect([...db.stores]).toEqual(['books'])
+		expect(Array.from(db.database.transaction(['books']).objectStore('books').indexNames)).toEqual([
+			'byTitle',
+		])
+		db.close()
+	})
+})
+
+describe('IndexedDBDatabase — construction reads the options once', () => {
+	it('reads an options getter once on admission', () => {
+		const reads = createRecorder<[string]>()
+		const db = createIndexedDBDatabase(createShiftingOptions(['catalogue'], reads))
+		expect(db.name).toBe('catalogue')
+		expect(reads.calls).toEqual([['name']])
+	})
+
+	it('reads an options getter once on refusal, and names the fault of that one read', () => {
+		const reads = createRecorder<[string]>()
+		const caught = captureError(() =>
+			createIndexedDBDatabase(createShiftingOptions(['', 'catalogue'], reads)),
+		)
+		expect(errorCode(caught)).toBe('DATA')
+		expect(caught).toHaveProperty('context', {
+			faults: [
+				{
+					reason: 'constraint',
+					path: ['name'],
+					expected: 'string',
+					constraint: 'min',
+					limit: 1,
+					received: '""',
+				},
+			],
+		})
+		expect(reads.calls).toEqual([['name']])
+	})
+
+	it('refuses a store definition getter at the clone, naming that cause, without reading it', () => {
+		const reads = createRecorder<[string]>()
+		const caught = captureError(() =>
+			createIndexedDBDatabase({ name: 'catalogue', stores: createShiftingStores(reads) }),
+		)
+		expect(errorCode(caught)).toBe('DATA')
+		expect(isIndexedDBError(caught) ? caught.message : undefined).toBe(
+			'Database options are not plain JSON data: cloneJSONValue: record property is not enumerable data',
+		)
+		expect(caught).toHaveProperty('context', {
+			clone: 'cloneJSONValue: record property is not enumerable data',
+		})
+		expect(isIndexedDBError(caught) ? caught.cause : undefined).toHaveProperty('code', 'clone')
+		expect(reads.calls).toEqual([])
+	})
+
+	it('keeps the name, version, and upgrade it admitted, whatever the caller changes later', async () => {
+		const name = mintDatabase()
+		await dropDatabase(name)
+		teardown.add(async () => dropDatabase(name))
+		const kept = createRecorder<[]>()
+		const replaced = createRecorder<[]>()
+		const options: { name: string; version: number; stores: IndexedDBSchema; upgrade: () => void } =
+			{ name, version: 1, stores: { books: { path: 'id' } }, upgrade: kept.handler }
+		const db = createIndexedDBDatabase(options)
+		options.name = mintDatabase()
+		options.version = 3
+		options.upgrade = replaced.handler
+		await db.connect()
+		expect(db.name).toBe(name)
+		expect(db.version).toBe(1)
+		expect(kept.calls).toHaveLength(1)
+		expect(replaced.calls).toEqual([])
+		db.close()
+	})
+
+	it('uses the name, version, and upgrade of the one read, though a later read would answer otherwise', async () => {
+		const name = mintDatabase()
+		await dropDatabase(name)
+		teardown.add(async () => dropDatabase(name))
+		const kept = createRecorder<[]>()
+		const replaced = createRecorder<[]>()
+		const reads = createRecorder<[string]>()
+		const db = createIndexedDBDatabase(
+			createChangingOptions(
+				{ name, version: 1, upgrade: kept.handler },
+				{ name: mintDatabase(), version: 3, upgrade: replaced.handler },
+				reads,
+			),
+		)
+		await db.connect()
+		expect(db.name).toBe(name)
+		expect(db.version).toBe(1)
+		expect(kept.calls).toHaveLength(1)
+		expect(replaced.calls).toEqual([])
+		expect(reads.calls).toEqual([['name'], ['version'], ['upgrade']])
+		db.close()
+	})
+
+	it('admits an empty key path and an empty index list', () => {
+		expect(
+			captureError(() =>
+				createIndexedDBDatabase({
+					name: 'catalogue',
+					stores: { books: { path: [], indexes: [] } },
+				}),
+			),
+		).toBeUndefined()
+	})
+
+	it('refuses a schema past the clone node limit, naming that cause', () => {
+		const stores = Object.fromEntries(
+			Array.from({ length: 140_000 }, (_, position) => [`store${position}`, { path: 'id' }]),
+		)
+		const caught = captureError(() => createIndexedDBDatabase({ name: 'catalogue', stores }))
+		expect(errorCode(caught)).toBe('DATA')
+		expect(isIndexedDBError(caught) ? caught.message : undefined).toBe(
+			'Database options are not plain JSON data: cloneJSONValue: snapshot exceeds the node limit 262144',
+		)
+		expect(caught).toHaveProperty('context', {
+			clone: 'cloneJSONValue: snapshot exceeds the node limit 262144',
+		})
 	})
 })

@@ -7,7 +7,15 @@
 // (`.claude/rules/typescript.md` § Errors and outcomes).
 
 import type { IndexedDBErrorCode } from './types.js'
-import { holds, INTRINSICS, isFunction, isObject } from '@orkestrel/contract'
+import {
+	holds,
+	INTRINSICS,
+	isFunction,
+	isInstance,
+	isObject,
+	isUndefined,
+} from '@orkestrel/contract'
+import { isIndexedDBErrorCode } from './validators.js'
 
 /**
  * Represents an error thrown by the IndexedDB wrapper, carrying a machine-readable
@@ -62,34 +70,27 @@ export class IndexedDBError extends Error {
  *
  * @param value - The value to test
  * @returns True if `value` is an `IndexedDBError`; false otherwise
+ *
+ * @example
+ * ```ts
+ * import { IndexedDBError, isIndexedDBError } from '@orkestrel/indexeddb'
+ *
+ * isIndexedDBError(new IndexedDBError('NOT_FOUND', 'No record in store users')) // true
+ * isIndexedDBError(new Error('No record in store users')) // false
+ * ```
  */
 export function isIndexedDBError(value: unknown): value is IndexedDBError {
 	return holds(() => {
-		if (!(value instanceof Error) || INTRINSICS.prototype(value) === Error.prototype) return false
+		const intrinsic = INTRINSICS.error
+		if (!isInstance(value, intrinsic) || INTRINSICS.prototype(value) === intrinsic.prototype)
+			return false
 		if (
 			INTRINSICS.describe(value, Symbol.for('@orkestrel/indexeddb.IndexedDBError'))?.value !== value
 		)
 			return false
 		const code: unknown = INTRINSICS.reflect.read(value, 'code')
-		if (
-			![
-				'NOT_OPEN',
-				'CLOSED',
-				'NOT_FOUND',
-				'CONSTRAINT',
-				'QUOTA',
-				'ABORTED',
-				'DATA',
-				'OPEN',
-				'UPGRADE',
-				'INACTIVE',
-				'READONLY',
-				'INVALID',
-				'UNKNOWN',
-			].some((candidate) => candidate === code)
-		)
-			return false
+		if (!isIndexedDBErrorCode(code)) return false
 		const context: unknown = INTRINSICS.reflect.read(value, 'context')
-		return context === undefined || isObject(context) || isFunction(context)
+		return isUndefined(context) || isObject(context) || isFunction(context)
 	})
 }

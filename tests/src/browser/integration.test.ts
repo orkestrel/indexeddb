@@ -17,7 +17,12 @@ import {
 } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createTeardown } from '@orkestrel/test'
-import { createDatabaseCleanup, createTestDatabase, removeInactive } from '../../setupBrowser.js'
+import {
+	createDatabaseCleanup,
+	createTestDatabase,
+	readRecordClaim,
+	removeInactive,
+} from '../../setupBrowser.js'
 
 // The EXECUTED half of guides parity for `guides/indexeddb.md`. `tests/guides.test.ts` reads
 // names — from the guide's tables, from the barrel, from each fence's imports — and a name that
@@ -222,7 +227,7 @@ describe('guides/indexeddb.md — Branching on a typed fault', () => {
 			.then(
 				() => 'no fault',
 				async (error: unknown) => {
-					if (!(error instanceof IndexedDBError) || error.code !== 'CONSTRAINT') throw error
+					if (!isIndexedDBError(error) || error.code !== 'CONSTRAINT') throw error
 					await db.store('users').set({ id: 'u1', name: 'Ada' })
 					return 'CONSTRAINT'
 				},
@@ -280,9 +285,9 @@ describe('guides/indexeddb.md — Versioned upgrades', () => {
 				// Create a store the built-in create-missing pass doesn't cover because it
 				// isn't declared in `stores` — app-internal bookkeeping, for example.
 				context.stores.create('meta', { path: 'key' })
-				// The built-in pass only creates missing stores, so an index on an
-				// already-existing store goes through the index manager; `drop` is its
-				// inverse, over an index a prior version left behind.
+				// A declared index the store lacks is created by the built-in index pass
+				// after this callback, which finds `byName` present when the callback
+				// creates it first; `drop` removes an index a prior version left behind.
 				context.indexes.create('users', { name: 'byName', path: 'name' })
 				context.indexes.drop('users', 'byRetired')
 				// Migrate data in place, awaiting only the IDB requests `store()` issues.
@@ -312,5 +317,24 @@ describe('guides/indexeddb.md — Versioned upgrades', () => {
 		expect(Array.from(db.database.transaction(['users']).objectStore('users').indexNames)).toEqual([
 			'byName',
 		])
+	})
+})
+
+describe('guides/indexeddb.md — Contract invariant 7', () => {
+	it('raises RECORD from every value read while count, has, and keys read the entry', async () => {
+		const fault = {
+			code: 'RECORD',
+			context: { store: 'books', key: 'b' },
+			message: expect.not.stringContaining('7310'),
+		}
+		expect(await readRecordClaim()).toEqual({
+			count: 3,
+			has: true,
+			keys: ['a', 'b', 'c'],
+			get: fault,
+			resolve: fault,
+			records: fault,
+			value: fault,
+		})
 	})
 })

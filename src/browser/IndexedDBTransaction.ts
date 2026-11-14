@@ -3,6 +3,7 @@ import type {
 	IndexedDBTransactionInterface,
 	IndexedDBTransactionStoreInterface,
 } from './types.js'
+import { preview } from '@orkestrel/contract'
 import { IndexedDBError } from './errors.js'
 import { wrapCall } from './helpers.js'
 import { IndexedDBTransactionStore } from './IndexedDBTransactionStore.js'
@@ -80,7 +81,7 @@ export class IndexedDBTransaction<
 		if (!this.#stores.includes(name)) {
 			throw new IndexedDBError(
 				'NOT_FOUND',
-				`Store '${name}' is outside this transaction's scope (${this.#stores.join(', ')})`,
+				`Store ${preview(name)} is outside this transaction's scope (${this.#stores.map(preview).join(', ')})`,
 				undefined,
 				{ store: name, scope: this.#stores },
 			)
@@ -88,7 +89,7 @@ export class IndexedDBTransaction<
 		if (this.#finished) {
 			throw new IndexedDBError(
 				'ABORTED',
-				`Transaction over ${this.#stores.join(', ')} is no longer active`,
+				`Transaction over ${this.#stores.map(preview).join(', ')} is no longer active`,
 				undefined,
 				{ store: name, scope: this.#stores },
 			)

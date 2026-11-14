@@ -1,8 +1,9 @@
 import type { IndexedDBTransactionStoreInterface } from '@src/browser'
-import { IndexedDBError, rangeFromKey } from '@src/browser'
+import { IndexedDBError, isIndexedDBError, promisifyRequest, rangeFromKey } from '@src/browser'
 import { afterEach, describe, expect, it } from 'vitest'
+import { isNumber } from '@orkestrel/contract'
 import { createTeardown, waitForDelay } from '@orkestrel/test'
-import { createTestDatabase, drainCursor, errorCode } from '../../setupBrowser.js'
+import { createTestDatabase, drainCursor, errorCode, seedNonRecord } from '../../setupBrowser.js'
 
 // `IndexedDBTransactionStoreInterface` in real Chromium, reached through
 // `transaction.store(name)` inside a `db.read` / `db.write` scope: the live `store`
@@ -63,6 +64,31 @@ describe('IndexedDBTransactionStore — CRUD within a scope', () => {
 		})
 		expect(await caught.promise).toBeInstanceOf(IndexedDBError)
 		expect(errorCode(await caught.promise)).toBe('NOT_FOUND')
+	})
+
+	it('resolve writes a missing key through a capped preview, and keeps the raw key in the context', async () => {
+		const { db, cleanup } = await createTestDatabase({ users: { path: 'id' } })
+		teardown.add(cleanup)
+		const long = 'k'.repeat(1_000_000)
+		const faults = Promise.withResolvers<readonly unknown[]>()
+		await db.read('users', async (transaction) => {
+			const users = transaction.store('users')
+			faults.resolve([
+				await users.resolve(long).catch((error: unknown) => error),
+				await users.resolve("x); store 'y'").catch((error: unknown) => error),
+			])
+		})
+		const [lengthy, forged] = await faults.promise
+		expect(errorCode(lengthy)).toBe('NOT_FOUND')
+		expect(isIndexedDBError(lengthy) ? lengthy.message.length : Number.NaN).toBeLessThan(200)
+		expect(isIndexedDBError(lengthy) ? lengthy.context : undefined).toEqual({
+			store: 'users',
+			key: long,
+		})
+		expect(isIndexedDBError(forged) ? forged.message : undefined).toBe(
+			`No record in store "users" for key "x); store 'y'"`,
+		)
+		expect(forged).toHaveProperty('context', { store: 'users', key: "x); store 'y'" })
 	})
 
 	it('add throws CONSTRAINT on a duplicate within the scope', async () => {
@@ -138,7 +164,7 @@ describe('IndexedDBTransactionStore — out-of-line keys and cursor', () => {
 		const ids = Promise.withResolvers<readonly string[]>()
 		await db.read('users', async (transaction) => {
 			const seen = await drainCursor(await transaction.store('users').cursor())
-			ids.resolve(seen.map((cursor) => String(cursor.value?.id)))
+			ids.resolve(seen.map((cursor) => String(cursor.value.id)))
 		})
 		expect(await ids.promise).toEqual(['a', 'b'])
 	})
@@ -181,5 +207,134 @@ describe('IndexedDBTransactionStore — synchronous native faults', () => {
 		const caught = await bound.get('u1').catch((error: unknown) => error)
 		expect(caught).toBeInstanceOf(IndexedDBError)
 		expect(errorCode(caught)).toBe('INACTIVE')
+	})
+})
+
+describe('IndexedDBTransactionStore — a stored value that is no record', () => {
+	it('raises RECORD from get, resolve, and records, each naming the key', async () => {
+		const db = await seedNonRecord(teardown, 7310)
+		const faults = Promise.withResolvers<readonly unknown[]>()
+		await db.read('books', async (transaction) => {
+			const books = transaction.store('books')
+			faults.resolve([
+				await books.get('b').catch((error: unknown) => error),
+				await books.resolve('b').catch((error: unknown) => error),
+				await books.records().catch((error: unknown) => error),
+			])
+		})
+		const [got, resolved, bulk] = await faults.promise
+		expect(errorCode(got)).toBe('RECORD')
+		expect(got).toHaveProperty('context', { store: 'books', key: 'b' })
+		expect(errorCode(resolved)).toBe('RECORD')
+		expect(resolved).toHaveProperty('context', { store: 'books', key: 'b' })
+		expect(errorCode(bulk)).toBe('RECORD')
+		expect(bulk).toHaveProperty('context', { store: 'books', key: 'b' })
+	})
+
+	it('reads the entry through count, has, and keys inside the scope', async () => {
+		const db = await seedNonRecord(teardown, 7310)
+		const reads = Promise.withResolvers<readonly unknown[]>()
+		await db.read('books', async (transaction) => {
+			const books = transaction.store('books')
+			reads.resolve([await books.count(), await books.has('b'), await books.keys()])
+		})
+		expect(await reads.promise).toEqual([3, true, ['a', 'b', 'c']])
+	})
+})
+
+describe('IndexedDBTransactionStore — the key a failing bulk read names beside the caller writes', () => {
+	it('names no key when the caller removes the number before the pair reads, and the record stays', async () => {
+		const { db, cleanup } = await createTestDatabase({ notes: {} })
+		teardown.add(cleanup)
+		await db.write('notes', async (transaction) => {
+			const native = transaction.store('notes').store
+			await promisifyRequest(native.put(7310, 'k01'))
+			await promisifyRequest(native.put({ title: 'Kept' }, 'k02'))
+		})
+		const outcome = Promise.withResolvers<unknown>()
+		await db.write('notes', async (transaction) => {
+			const notes = transaction.store('notes')
+			const [caught] = await Promise.all([
+				notes.records().catch((error: unknown) => error),
+				notes.remove('k01'),
+			])
+			outcome.resolve(caught)
+		})
+		const caught = await outcome.promise
+		expect(errorCode(caught)).toBe('RECORD')
+		expect(caught).toHaveProperty('context', { store: 'notes' })
+		expect(String(caught)).toContain('left before its key was read')
+		expect(await db.store('notes').get('k02')).toEqual({ title: 'Kept' })
+	})
+
+	it('reaches the hazard: a key list asked after the failing read names the record at k02', async () => {
+		// The control for the preceding case: the late form, `getAllKeys(query, position + 1)`
+		// issued after the failing read settles, queues behind the caller's delete.
+		const { db, cleanup } = await createTestDatabase({ notes: {} })
+		teardown.add(cleanup)
+		await db.write('notes', async (transaction) => {
+			const native = transaction.store('notes').store
+			await promisifyRequest(native.put(7310, 'k01'))
+			await promisifyRequest(native.put({ title: 'Kept' }, 'k02'))
+		})
+		const named = Promise.withResolvers<unknown>()
+		await db.write('notes', async (transaction) => {
+			const native = transaction.store('notes').store
+			const read = promisifyRequest(native.getAll())
+			const removal = promisifyRequest(native.delete('k01'))
+			const values = await read
+			const position = values.findIndex(isNumber)
+			const late = await promisifyRequest(native.getAllKeys(undefined, position + 1))
+			await removal
+			named.resolve(late.at(-1))
+		})
+		expect(await named.promise).toBe('k02')
+	})
+
+	it('names the key the pair read when the caller removes that entry after a read queued behind the failing one', async () => {
+		// The caller's removal is issued after the failing read settles and after the pair
+		// is issued, so only a pair with no `await` between its calls reads both lists
+		// before the removal runs.
+		const { db, cleanup } = await createTestDatabase({ notes: {} })
+		teardown.add(cleanup)
+		await db.write('notes', async (transaction) => {
+			const native = transaction.store('notes').store
+			await promisifyRequest(native.put(7310, 'k01'))
+			await promisifyRequest(native.put({ title: 'Kept' }, 'k02'))
+		})
+		const outcome = Promise.withResolvers<unknown>()
+		await db.write('notes', async (transaction) => {
+			const notes = transaction.store('notes')
+			const read = notes.records().catch((error: unknown) => error)
+			await notes.get('k02')
+			await notes.remove('k01')
+			outcome.resolve(await read)
+		})
+		const caught = await outcome.promise
+		expect(errorCode(caught)).toBe('RECORD')
+		expect(caught).toHaveProperty('context', { store: 'notes', key: 'k01' })
+	})
+
+	it('names k02 when the number sits at k02 and the caller removes the record at k01', async () => {
+		const { db, cleanup } = await createTestDatabase({ notes: {} })
+		teardown.add(cleanup)
+		await db.write('notes', async (transaction) => {
+			const native = transaction.store('notes').store
+			await promisifyRequest(native.put({ title: 'Gone' }, 'k01'))
+			await promisifyRequest(native.put(7310, 'k02'))
+		})
+		const outcome = Promise.withResolvers<unknown>()
+		await db.write('notes', async (transaction) => {
+			const notes = transaction.store('notes')
+			const [caught] = await Promise.all([
+				notes.records().catch((error: unknown) => error),
+				notes.remove('k01'),
+			])
+			outcome.resolve(caught)
+		})
+		const caught = await outcome.promise
+		expect(errorCode(caught)).toBe('RECORD')
+		expect(caught).toHaveProperty('context', { store: 'notes', key: 'k02' })
+		expect(String(caught)).not.toContain('7310')
 	})
 })
